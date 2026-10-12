@@ -1,0 +1,60 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {Readable} from 'node:stream';
+import {mkdtemp,readFile,rm} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {previewWorkshopVisit} from '../lib/workshop.js';
+
+test('workshop registration, automatic CPK, corrections, backdating and atomic rollback',async()=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),'fleetwise-workshop-'));
+ process.env.DATA_FILE=path.join(dir,'fleet.json');process.env.DISABLE_GEMINI='1';process.env.FLEETWISE_NO_LISTEN='1';
+ try {
+  const {handleRequest}=await import('../server.js');
+  let cookie='';
+  const call=(url,method='GET',body)=>new Promise((resolve,reject)=>{
+   const req=Readable.from(body?[JSON.stringify(body)]:[]);Object.assign(req,{url,method,headers:{cookie}});let status=200;
+   handleRequest(req,{writeHead(code){status=code;},setHeader(name,value){if(name==='set-cookie')cookie=value.split(';')[0];},end(text){resolve({status,data:JSON.parse(text)});}}).catch(reject);
+  });
+  assert.equal((await call('/api/login','POST',{email:'admin@fleetwise.local',password:'FleetwiseDemo!2026'})).status,200);
+  const state=async()=> (await call('/api/state')).data;
+  const initial=await state();
+  const first={truckId:'__new__',newTruck:{plate:'WORKSHOP 01',model:'Hino 500',duty:'Regional haul'},date:'2025-01-10',odometer:100000,workshop:'Staff workshop',notes:'First visit',labor:1000000,otherCost:0,items:[]};
+  assert.equal(previewWorkshopVisit(initial,first).cpk,null);
+  assert.equal((await call('/api/maintenance','POST',{...first,odometer:''})).status,400);
+  assert.equal((await state()).trucks.length,initial.trucks.length,'failed registration must roll back truck');
+  assert.equal((await call('/api/maintenance','POST',first)).status,200);
+  let db=await state();const truck=db.trucks.find(t=>t.plate==='WORKSHOP 01'),id=truck.id;
+  let firstId=db.maintenance.find(m=>m.truckId===id).id;
+  assert.equal(truck.trackingMode,'workshop');assert.equal(truck.baselineOdometer,100000);assert.equal(truck.baselineDate,first.date);
+  assert.equal(db.analytics.trucks.find(t=>t.id===id).cpk,null);
+  assert.equal((await call('/api/maintenance','POST',first)).status,400,'duplicate plate rejected');
+  const second={...first,newTruck:undefined,truckId:id,date:'2025-02-10',odometer:110000,labor:1500000};
+  assert.equal(previewWorkshopVisit(db,second).cpk,250);
+  assert.equal((await call('/api/maintenance','POST',second)).status,200);
+  db=await state();let metric=db.analytics.trucks.find(t=>t.id===id);const secondId=db.maintenance.find(m=>m.truckId===id&&m.date===second.date).id;
+  assert.equal(metric.odometer,110000);assert.equal(metric.spend,2500000);assert.equal(metric.cpk,250);
+  const correction={...second,odometer:105000};
+  assert.equal(previewWorkshopVisit(db,correction,secondId).cpk,500);
+  assert.equal((await call(`/api/maintenance/${secondId}`,'PUT',correction)).status,200);
+  db=await state();assert.equal(db.analytics.trucks.find(t=>t.id===id).cpk,500);
+  assert.equal((await call('/api/maintenance','POST',{...second,date:'2025-03-10',odometer:104000})).status,400,'odometer must increase with service dates');
+  assert.equal((await state()).trucks.find(t=>t.id===id).odometer,105000,'rejected service must not change mileage');
+  const backdated={...second,date:'2025-01-01',odometer:90000,labor:500000};
+  assert.equal((await call('/api/maintenance','POST',backdated)).status,200);
+  db=await state();metric=db.analytics.trucks.find(t=>t.id===id);const oldId=db.maintenance.find(m=>m.truckId===id&&m.date===backdated.date).id;
+  assert.equal(metric.baselineOdometer,90000);assert.equal(metric.cpk,200);
+  assert.equal((await call(`/api/maintenance/${oldId}`,'DELETE')).status,200);
+  assert.equal((await call(`/api/maintenance/${secondId}`,'DELETE')).status,200);
+  db=await state();assert.equal(db.trucks.find(t=>t.id===id).odometer,100000);assert.equal(db.analytics.trucks.find(t=>t.id===id).cpk,null);
+  const correctedFirst={...first,newTruck:undefined,truckId:id,odometer:95000};
+  assert.equal((await call(`/api/maintenance/${firstId}`,'PUT',correctedFirst)).status,200);
+  db=await state();assert.equal(db.trucks.find(t=>t.id===id).odometer,95000,'first-visit corrections must also update mileage');
+  assert.equal((await call(`/api/trucks/${id}`,'PUT',{...db.trucks.find(t=>t.id===id),odometer:120000})).status,200);
+  assert.equal((await call('/api/maintenance','POST',second)).status,200);
+  db=await state();const serviceId=db.maintenance.find(m=>m.truckId===id&&m.date===second.date).id;
+  assert.equal((await call(`/api/maintenance/${serviceId}`,'DELETE')).status,200);
+  db=await state();assert.equal(db.trucks.find(t=>t.id===id).odometer,120000,'independently reported mileage survives service deletion');
+  const saved=JSON.parse(await readFile(process.env.DATA_FILE,'utf8'));assert.equal(saved.trucks.find(t=>t.id===id).trackingMode,'workshop');
+ }finally{await rm(dir,{recursive:true,force:true});}
+});

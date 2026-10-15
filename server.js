@@ -9,6 +9,7 @@ import { normalize, validate } from './lib/validation.js';
 import { rememberReportedMileage, syncWorkshopMileage } from './lib/workshop.js';
 import {roles,hashPassword,verifyPassword,publicUser,demoUsers,sessionManager,sessionCookie,canManageFleet,visibleData} from './lib/auth.js';
 import {createTrip,addLocations,completeTrip,truckSpecifications,locationPoint} from './lib/trips.js';
+import {documentInput,extractOrders,newOrder,reviseOrder,googleOrderRoute,estimateCosts,attachOrderToTrip,completeOrderForTrip} from './lib/orders.js';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
 try { for(const line of (await readFile(path.join(root,'.env'),'utf8')).split('\n')) { const m=line.match(/^([A-Z_]+)\s*=\s*(.*)$/); if(m&&!process.env[m[1]]) process.env[m[1]]=m[2].trim().replace(/^['"]|['"]$/g,''); } } catch(e) { if(e.code!=='ENOENT') throw e; }
@@ -25,12 +26,12 @@ if(!db.users){
     db.users=[{id:randomUUID(),name:'Administrator',email:process.env.ADMIN_EMAIL.trim().toLowerCase(),role:'admin',active:true,assignedTruckIds:[],passwordHash:hashPassword(process.env.ADMIN_PASSWORD)}];
   }
 }
-db.trips??=[];db.schemaVersion=2;
+db.trips??=[];db.orders??=[];db.schemaVersion=3;
 await writeFile(dataFile,JSON.stringify(db,null,2),{mode:0o600});
 const sessions=sessionManager();
 const secureCookie=process.env.COOKIE_SECURE==='1';
 const allowedOrigins=new Set([`http://localhost:${port}`,`http://127.0.0.1:${port}`,...(process.env.APP_ORIGIN||'').split(',').map(v=>v.trim()).filter(Boolean)]);
-const integrations=()=>({maps:{keyConfigured:Boolean(process.env.MAPS_API_KEY),status:'placeholder'},routing:{keyConfigured:Boolean(process.env.TRUCK_ROUTING_API_KEY),provider:process.env.TRUCK_ROUTING_PROVIDER||'Not selected',status:'not_connected',priority:'fastest',tollsAllowed:true},elevation:{keyConfigured:Boolean(process.env.ELEVATION_API_KEY),status:'not_connected'}});
+const integrations=()=>({maps:{keyConfigured:Boolean(process.env.MAPS_API_KEY),status:process.env.MAPS_API_KEY?'order_distance_configured':'not_configured'},routing:{keyConfigured:Boolean(process.env.TRUCK_ROUTING_API_KEY),provider:process.env.TRUCK_ROUTING_PROVIDER||'Not selected',status:'not_connected',priority:'fastest',tollsAllowed:true},elevation:{keyConfigured:Boolean(process.env.ELEVATION_API_KEY),status:'not_connected'}});
 let queue=Promise.resolve();
 function transaction(fn) { const job=queue.then(async()=>{const next=structuredClone(db); const result=await fn(next); await writeFile(dataFile+'.tmp',JSON.stringify(next,null,2),{mode:0o600}); await rename(dataFile+'.tmp',dataFile); db=next; return result;}); queue=job.catch(()=>{}); return job; }
 const configured=Boolean(process.env.GEMINI_API_KEY)&&process.env.DISABLE_GEMINI!=='1';
@@ -57,7 +58,8 @@ async function runAI() {
   finally {aiRunning=false; if(db.revision!==snapshot.revision) scheduleAI();}
 }
 const json=(res,status,data)=>{res.writeHead(status,{'content-type':'application/json','cache-control':'no-store'});res.end(JSON.stringify(data));};
-async function body(req) { let raw=''; for await(const chunk of req) { raw+=chunk; if(Buffer.byteLength(raw)>262144) throw new Error('Request too large.'); } try{return JSON.parse(raw);}catch{throw new Error('Invalid JSON request.');} }
+async function body(req,limit=262144) { let raw=''; for await(const chunk of req) { raw+=chunk; if(Buffer.byteLength(raw)>limit) throw new Error('Request too large.'); } try{return JSON.parse(raw);}catch{throw new Error('Invalid JSON request.');} }
+const ocrAttempts=new Map();let ocrRunning=0;
 const production=process.argv.includes('--production');
 const noListen=process.env.FLEETWISE_NO_LISTEN==='1';
 const vite=production||noListen?null:await (await import('vite')).createServer({root,server:{middlewareMode:true},appType:'spa'});
@@ -88,6 +90,59 @@ export async function handleRequest(req,res){
     if(req.method==='GET'&&url.pathname==='/api/state'){
       const data=visibleData(db,user);data.trips=data.trips.map(({points,...trip})=>({...trip,lastLocation:points.at(-1),pointCount:points.length}));
       return json(res,200,{...data,analytics:analytics(data),gemini:{configured:user.role!=='driver'&&configured,model},integrations:integrations()});
+    }
+    if(url.pathname==='/api/orders'||url.pathname.startsWith('/api/orders/')){
+      const segments=url.pathname.split('/'),id=segments[3],action=segments[4];
+      if(req.method==='GET'&&!id){
+        if(!['admin','driver'].includes(user.role))return json(res,403,{error:'Order access requires admin or assigned driver access.'});
+        return json(res,200,{orders:visibleData(db,user).orders});
+      }
+      if(user.role!=='admin')return json(res,403,{error:'Only administrators can manage or extract delivery orders.'});
+      if(req.method==='POST'&&id==='extract'&&!action){
+        if(!configured)return json(res,503,{error:'Gemini OCR is not configured. Set GEMINI_API_KEY and restart, or create an order manually.'});
+        const now=Date.now(),attempt=ocrAttempts.get(user.id);
+        if(ocrRunning>=2||(attempt&&attempt.until>now&&attempt.count>=10))return json(res,429,{error:'OCR is busy or the extraction limit was reached. Try again shortly.'});
+        ocrAttempts.set(user.id,{until:attempt?.until>now?attempt.until:now+60000,count:attempt?.until>now?attempt.count+1:1});
+        ocrRunning++;
+        try{
+          const document=documentInput(await body(req,12*1024*1024));
+          if(db.orders.some(o=>o.source?.sha256===document.sha256))throw new Error('This document was already imported. Review its existing order drafts.');
+          let extracted;try{extracted=await extractOrders(document,{apiKey:process.env.GEMINI_API_KEY,model:process.env.GEMINI_OCR_MODEL||model});}catch(e){return json(res,502,{error:e.name==='TimeoutError'?'Gemini OCR timed out. Try again.':e.message});}
+          const created=extracted.orders.map(input=>newOrder(input,randomUUID(),user.id,{kind:'gemini_ocr',filename:document.name,mimeType:document.mimeType,sha256:document.sha256,model:process.env.GEMINI_OCR_MODEL||model,extractedAt:new Date().toISOString(),warnings:extracted.warnings}));
+          await transaction(next=>{
+            if(!next.users.some(u=>u.id===user.id&&u.active&&u.role==='admin'))throw new Error('Your administrator access changed. Sign in again.');
+            if(next.orders.some(o=>o.source?.sha256===document.sha256))throw new Error('This document was already imported.');
+            next.orders.push(...created);
+          });
+          return json(res,200,{orders:created,warnings:extracted.warnings});
+        }finally{ocrRunning--;}
+      }
+      if(req.method==='POST'&&!id){
+        const input=await body(req),record=newOrder(input,randomUUID(),user.id);
+        await transaction(next=>{next.orders.push(record);});return json(res,200,{order:record});
+      }
+      if(req.method==='PUT'&&id&&!action){
+        const input=await body(req);let order;
+        await transaction(next=>{const index=next.orders.findIndex(o=>o.id===id);if(index<0)throw new Error('Order not found.');order=reviseOrder(next.orders[index],input,next,user);next.orders[index]=order;});
+        return json(res,200,{order});
+      }
+      if(req.method==='POST'&&id&&action==='estimate'&&segments.length===5){
+        const input=await body(req),order=db.orders.find(o=>o.id===id);
+        if(!order)throw new Error('Order not found.');
+        if(input.version!==order.version)throw new Error('This order changed. Reload before estimating.');
+        if(!order.reviewedAt)throw new Error('Review and save the order before calculating distance.');
+        if(['in_transit','completed'].includes(order.status))throw new Error('The dispatched estimate is frozen once the trip starts.');
+        if(!process.env.MAPS_API_KEY)return json(res,503,{error:'Google Maps distance is not configured. Set MAPS_API_KEY with Routes API enabled and restart.'});
+        let route;try{route=await googleOrderRoute(order,{apiKey:process.env.MAPS_API_KEY});}catch(e){return json(res,502,{error:e.name==='TimeoutError'?'Google Maps timed out. Try again.':e.message});}
+        let updated;
+        await transaction(next=>{
+          if(!next.users.some(u=>u.id===user.id&&u.active&&u.role==='admin'))throw new Error('Your administrator access changed. Sign in again.');
+          const current=next.orders.find(o=>o.id===id);if(current.version!==order.version)throw new Error('The order changed while Google was calculating. Refresh and try again.');
+          current.estimate=estimateCosts(current,route,next);current.version++;current.updatedAt=new Date().toISOString();updated=current;
+        });
+        return json(res,200,{order:updated});
+      }
+      return json(res,404,{error:'Order endpoint not found.'});
     }
     if(url.pathname.startsWith('/api/users')){
       if(user.role!=='admin')return json(res,403,{error:'Administrator access required.'});
@@ -121,6 +176,7 @@ export async function handleRequest(req,res){
       await transaction(next=>{
         if(!id){
           const trip=createTrip(input,user,next,randomUUID());
+          attachOrderToTrip(next,input,user,trip);
           rememberReportedMileage(next);const truck=next.trucks.find(t=>t.id===trip.truckId);truck.reportedOdometer=trip.startOdometer;truck.specifications=trip.specs;syncWorkshopMileage(next);
           trip.maintenanceCpkAtStart=analytics(next).trucks.find(t=>t.id===trip.truckId).cpk;
           next.trips.push(trip);result={tripId:trip.id};
@@ -130,7 +186,7 @@ export async function handleRequest(req,res){
           if(trip.status!=='active')throw new Error('This trip has already ended.');
           if(action==='locations'){result={accepted:addLocations(trip,input.points)};}
           else if(action==='complete'){
-            const truck=next.trucks.find(t=>t.id===trip.truckId);const complete=completeTrip(trip,input,truck);
+            const truck=next.trucks.find(t=>t.id===trip.truckId);const complete=completeTrip(trip,input,truck);completeOrderForTrip(next,complete);
             next.trips[next.trips.indexOf(trip)]=complete;rememberReportedMileage(next);truck.reportedOdometer=complete.endOdometer;syncWorkshopMileage(next);result={tripId:id};
           }else throw new Error('Unknown trip action.');
         }
@@ -156,6 +212,7 @@ export async function handleRequest(req,res){
       if(req.method!=='POST'&&index<0)throw new Error('Record not found.');
       if(req.method==='DELETE') {
         if(type==='trucks'&&next.maintenance.some(m=>m.truckId===id))throw new Error('Delete this truck’s maintenance records first.');
+        if(type==='trucks'&&next.orders.some(o=>o.truckId===id))throw new Error('This truck has delivery order history and cannot be deleted.');
         if(type==='trucks'&&next.trips.some(t=>t.truckId===id))throw new Error('This truck has trip history and cannot be deleted.');
         if(type==='parts'&&next.maintenance.some(m=>m.items.some(i=>i.partId===id)))throw new Error('This part is used in maintenance history and cannot be deleted.');
         next[type].splice(index,1);

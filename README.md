@@ -6,6 +6,8 @@ React + JavaScript frontend with a Node.js backend. A local demo with role-based
 
 See [Arah Produk dan Pengembangan](ARAH_PENGEMBANGAN.md) for the detailed Indonesian blueprint: business workflows, CPK rules, current implementation status, RBAC, Maps/Gemini/PWA plans, roadmap, and acceptance criteria.
 
+For a module-by-module explanation and all implemented formulas with examples, see [Panduan Modul, Data, dan Rumus](MODUL_DAN_RUMUS.md) (Indonesian).
+
 ## Run locally
 
 Requires Node.js 20 or later. Open this folder in VS Code, then in its terminal:
@@ -24,6 +26,43 @@ npm start -- --production
 ```
 
 The production command serves the built `dist/` frontend. Change `PORT` in `.env` if needed.
+
+## Delivery orders, Gemini OCR, and dispatch
+
+Admin → **Delivery orders** accepts PDF/JPEG/PNG/WebP documents up to 8 MiB. Click **Extract draft orders** to send the selected document to Gemini. It extracts up to 20 distinct orders, each with up to 10 ordered stops and 100 cargo lines. The server validates the structured result before saving any drafts. Unreadable/missing values stay blank or unknown; admin must review and confirm the reference, pickup, every stop address, and cargo before assignment. The same file hash cannot be imported twice. A manual-entry workflow works without Gemini.
+
+Choose an active driver and a truck already assigned to that driver in People & access. Saving a reviewed order automatically requests Google Maps distance when its key is configured; **Refresh Maps estimate** can recalculate it. Distance is not entered manually or guessed by Gemini. The calculation follows pickup → intermediate stops → final stop in the listed order, one way. It does not optimize stop sequence or include a return leg, unloading time, or terrain adjustment.
+
+Configure the server and restart:
+
+```env
+GEMINI_API_KEY=your_gemini_key
+# Optional: defaults to GEMINI_MODEL
+GEMINI_OCR_MODEL=
+# Google Maps Platform key with Routes API enabled
+MAPS_API_KEY=your_google_routes_key
+```
+
+The Google adapter uses traffic-aware DRIVE routing with tolls allowed. Missing keys, provider errors, ambiguous partial address matches, and missing routes produce explicit errors while saved orders remain intact. Address strings should include city/country and must be reviewed. Google driving routes and toll prices **do not verify Indonesian truck restrictions or the truck’s toll class**; the existing external dispatcher approval is still required. API billing/access depends on your provider accounts. Live OCR/Maps calls have not been tested with real keys.
+
+Estimates keep these amounts separate:
+
+- Historical maintenance CPK = the selected truck’s recorded maintenance cost / tracked odometer distance.
+- Estimated maintenance cost = historical maintenance CPK × Google distance.
+- Estimated fuel liters = Google distance / admin-entered loaded fuel efficiency (km/liter).
+- Estimated fuel cost = estimated liters × admin-entered IDR/liter.
+- Toll cost = admin truck-class override when entered, otherwise Google IDR driving toll estimate when returned. Blank means unknown; an explicit 0 override means no toll charge expected.
+- Estimated total trip CPK = (maintenance + fuel + toll estimate) / Google distance. A missing component keeps the total unknown.
+
+For example, distance 240 km, maintenance CPK Rp250/km, fuel efficiency 4 km/liter, fuel price Rp10,000/liter, and toll estimate Rp150,000 gives Rp60,000 maintenance + Rp600,000 fuel + Rp150,000 toll = Rp810,000, or Rp3,375/km estimated total trip CPK. This total is separate from actual maintenance CPK and never creates a maintenance expense.
+
+Drivers see only their assigned orders in Trips & GPS. **Use this delivery order** fills the truck, final destination, and cargo weight; all stops are attached to the trip. GPS, truck/load declaration, assignment checks, and external route approval remain required. Starting/finishing the linked trip updates the order from assigned → in transit → completed. Completion means the trip was closed, not independently verified proof that each stop received its cargo; per-stop signatures, partial deliveries, and proof of delivery are not implemented. One order can link to one trip; combining several orders into one trip is not implemented.
+
+Order edits clear the old estimate; concurrent edits are rejected by version. Started/completed orders and their dispatch estimates are frozen. Estimates are snapshots with timestamps and a maintenance revision; refresh before dispatch when mileage/costs change. Orders may be assigned while estimates are unavailable, clearly labeled unknown.
+
+Original document bytes are not stored in `data/fleet.json`; extracted fields, filename/type, SHA-256, model, warnings, and timestamps are retained. Original-file review is available for the selected upload during the current browser session. Retain originals separately if your workflow requires them. Extraction is admin-only, limited to two concurrent requests and ten starts per admin per minute; keys remain server-side. Managers/workshop users receive no order records; drivers receive their own assigned records without OCR source metadata. Order mutations do not send customer documents to the maintenance analyst.
+
+Implementation references: [Gemini generateContent media and structured responses](https://ai.google.dev/api/generate-content), [Google Routes computeRoutes](https://developers.google.com/maps/documentation/routes/compute_route_directions), and [intermediate waypoints](https://developers.google.com/maps/documentation/routes/intermed_waypoints).
 
 ## Included
 
@@ -98,7 +137,7 @@ For an empty workspace, stop the server and replace the file with this object af
 
 ## Checks
 
-`npm test` verifies CPK weighting, lifecycle matching, actual-price history, compatibility, workshop CRUD, password hashing, sessions, server-side RBAC, assignment checks, driver isolation, overload rejection, GPS quality/replay validation, trip completion, persisted records and odometer-based CPK updates. Handler tests run in-process without a network port. Live Gemini verification needs an API key and network access.
+`npm test` verifies CPK weighting, lifecycle matching, actual-price history, compatibility, workshop CRUD, password hashing, sessions, server-side RBAC, assignment checks, driver isolation, overload rejection, GPS quality/replay validation, trip completion, persisted records and odometer-based CPK updates. Handler tests run in-process without a network port. The order tests also cover structured OCR validation, multi-stop Google requests, itemized costs, review/version checks, role isolation, failed integrations, duplicate uploads, and order-to-trip persistence using mocked providers. Live Gemini/Google verification needs real API keys and network access.
 
 
 ## Sign-in and role access
@@ -141,7 +180,7 @@ ELEVATION_API_KEY=
 GEMINI_API_KEY=
 ```
 
-Routing policy is **fastest arrival with toll roads allowed**. Map tiles, truck routes, ETA, elevation, uphill/downhill costs and Gemini route reasoning are not implemented yet. `/api/routes/preview` returns a clear unavailable response, never a fabricated route. Adding keys alone does not enable these adapters. The existing Gemini maintenance analyst remains available when its key is configured.
+Routing policy is **fastest arrival with toll roads allowed**. Admin delivery-order Google driving distance/ETA and optional driving toll estimates are implemented behind MAPS_API_KEY. Map tiles, truck-restriction routing, elevation, uphill/downhill costs and Gemini route reasoning remain unimplemented. `/api/routes/preview` returns a clear unavailable response, never a fabricated route. The order-distance adapter uses a Routes-enabled key; the other placeholders still need adapters. The existing Gemini maintenance analyst remains available when its key is configured.
 
 Choose a truck-routing provider with verified Indonesian restriction coverage. Google’s documented large-vehicle routing is currently available in the contiguous US and Japan, not Indonesia: https://developers.google.com/maps/documentation/routes/lvr . Before route analysis can be built, route geometry, restriction compliance and elevation data must come from the chosen provider. Gemini can explain grounded alternatives; it must not invent truck-safe routes or grade-cost multipliers.
 

@@ -1,6 +1,10 @@
 # KiloMetric — Arah Produk dan Pengembangan
 
-> Disusun oleh AI berdasarkan kebutuhan dan keputusan pengguna dalam percakapan proyek ini. Tanggal acuan: 13 Oktober 2026. Dokumen ini adalah panduan kerja yang perlu diperbarui bersama implementasi, bukan pernyataan bahwa seluruh rencana sudah selesai atau disetujui.
+> Disusun oleh AI berdasarkan kebutuhan dan keputusan pengguna dalam percakapan proyek ini. Tanggal awal: 13 Oktober 2026. Pembaruan terakhir: 16 Oktober 2026. Dokumen ini adalah panduan kerja yang perlu diperbarui bersama implementasi, bukan pernyataan bahwa seluruh rencana sudah selesai atau disetujui.
+
+## Panduan modul dan rumus lengkap
+
+Lihat [MODUL_DAN_RUMUS.md](MODUL_DAN_RUMUS.md) untuk penjelasan setiap modul, input/output, hubungan data, rumus sesuai kode, contoh angka, aturan unknown/nol, snapshot, validasi, dan kontrak API. Panduan tersebut juga membedakan CPK katalog per unit-kilometer, CPK kelompok Mix optimizer, serta estimasi order dan trip aktual.
 
 ## 1. Tujuan aplikasi
 
@@ -60,11 +64,13 @@ Gunakan empat label berikut saat mendiskusikan pekerjaan:
 | Deklarasi spesifikasi, muatan, dan pencatatan perjalanan | Tersedia | Batas teknis masih deklarasi pengguna, bukan verifikasi pabrikan |
 | GPS ponsel | Tersedia | Foreground, online, izin lokasi; bukan pelacak latar belakang |
 | Kerangka PWA dan halaman offline | Tersedia | Belum diuji pemasangan pada ponsel nyata; tidak ada antrean input offline |
-| Peta, geocoding, navigasi, ETA, truck routing | Placeholder | Mengisi API key saja belum mengimplementasikan adapter |
+| OCR delivery order dan penugasan | Tersedia, opsional Gemini | Draft perlu review admin; multi-stop; driver/truk sesuai penugasan |
+| Jarak/ETA delivery order Google Maps | Tersedia, membutuhkan key | DRIVE, urutan stop tetap; belum verifikasi batas truk |
+| Peta visual, navigasi, truck routing | Placeholder | Adapter truck routing masih perlu diimplementasikan |
 | Elevasi, biaya tanjakan/turunan, analisis rute Gemini | Placeholder/rencana | Belum ada data atau model biaya terkalibrasi |
 | Database produksi, audit trail, multi-perusahaan | Rencana | Belum ada dalam demo |
 
-Pada pekerjaan sebelumnya, 14 tes otomatis dan build produksi berhasil. Pengujian tersebut tidak membuktikan akurasi rute Indonesia, GPS pada perangkat nyata, instalasi PWA, atau kualitas jawaban Gemini live. Perubahan dokumen ini tidak menambahkan fitur runtime.
+Pada pembaruan delivery order, 19 tes otomatis dengan mock provider dan build produksi berhasil. Pengujian tersebut tidak membuktikan akurasi rute Indonesia, GPS pada perangkat nyata, instalasi PWA, atau kualitas jawaban Gemini live. Pembaruan runtime delivery order dijelaskan pada bagian 21.
 
 ## 4. Istilah dan batas perhitungan
 
@@ -76,7 +82,7 @@ Pada pekerjaan sebelumnya, 14 tes otomatis dan build produksi berhasil. Pengujia
 
 **CPK maintenance aktual** berasal dari biaya yang sudah dicatat. **Perkiraan biaya maintenance perjalanan** menggunakan CPK historis untuk mengalokasikan estimasi biaya pada jarak perjalanan. Kedua angka ini berbeda dan tidak boleh dijumlahkan sebagai pengeluaran baru.
 
-**Biaya perjalanan keseluruhan** dapat mencakup maintenance, bahan bakar, tol, dan biaya lain. Saat ini hanya perkiraan komponen maintenance yang tersedia; bahan bakar dan tol belum dihitung.
+**Biaya perjalanan keseluruhan** dapat mencakup maintenance, bahan bakar, tol, dan biaya lain. Perkiraan trip GPS yang lama tetap maintenance saja. Modul delivery order kini memisahkan estimasi maintenance, BBM, dan tol serta total CPK perjalanan; lihat pembaruan di bawah.
 
 Mata uang demo adalah IDR. Jarak odometer menggunakan kilometer. Pengguna tidak perlu mengisi CPK secara manual.
 
@@ -205,6 +211,8 @@ Rotasi ban antarposisi atau pemindahan komponen antartruk belum didukung oleh mo
 | Melihat perjalanan | Semua | Semua | Tidak | Milik sendiri |
 | Memulai/mengirim GPS/menyelesaikan perjalanan | Tidak | Tidak | Tidak | Milik sendiri, truk ditugaskan |
 | Mengelola akun dan penugasan | Ya | Tidak | Tidak | Tidak |
+| OCR, review, dan penugasan delivery order | Ya | Tidak | Tidak | Tidak |
+| Membaca delivery order | Semua | Tidak | Tidak | Milik sendiri |
 
 Pembatasan harus berlaku di server, bukan hanya menyembunyikan tombol. Driver mendapat data truk yang ditugaskan, katalog kompatibel, dan riwayat maintenance yang terkait; ia tidak mendapat akses menulis catatan bengkel atau perjalanan pengemudi lain.
 
@@ -345,6 +353,8 @@ JSON lokal cukup untuk demo satu server. Perubahan diserialisasi dan ditulis mel
 | `lib/validation.js` | Validasi data fleet dan maintenance |
 | `lib/analytics.js` | Biaya, CPK, siklus komponen, dan perbandingan |
 | `lib/trips.js` | Deklarasi truk, perjalanan, validasi GPS, dan odometer |
+| `lib/orders.js` | OCR, order, penugasan, Google distance, estimasi biaya, dan hubungan trip |
+| `src/orders.jsx`, `src/orders.css` | UI admin delivery order |
 | `lib/seed.js` | Data ilustratif awal |
 | `src/main.jsx`, `src/style.css` | CMS dan UI utama |
 | `src/driver.jsx`, `src/driver.css` | Alur pengemudi dan pengawasan perjalanan |
@@ -363,6 +373,7 @@ JSON lokal cukup untuk demo satu server. Perubahan diserialisasi dan ditulis mel
 | `/api/trucks`, `/api/parts`, `/api/maintenance` | Operasi master data dan maintenance sesuai role |
 | `/api/trips` dan route turunannya | Perjalanan, lokasi, dan penyelesaian milik driver |
 | `/api/analyze` | Permintaan analisis maintenance oleh admin/manajer |
+| `/api/orders` dan route turunannya | OCR admin, review/assignment, jarak otomatis, dan estimasi order |
 | `/api/routes/preview` | Placeholder; input valid tetap menghasilkan unavailable/503 tanpa kandidat rute |
 
 Tabel ini adalah ringkasan tanggung jawab, bukan spesifikasi lengkap payload tiap endpoint. Perubahan kontrak harus diperiksa pada handler dan tes terkait.
@@ -393,7 +404,8 @@ Referensi: [Geolocation watchPosition](https://developer.mozilla.org/en-US/docs/
 | --- | --- |
 | `GEMINI_API_KEY` | Mengaktifkan analis maintenance yang sudah diimplementasikan |
 | `GEMINI_MODEL` | Nama model generateContent yang tersedia untuk akun; verifikasi sebelum pemakaian |
-| `MAPS_API_KEY` | Slot integrasi peta; adapter belum tersedia |
+| `MAPS_API_KEY` | Adapter jarak/ETA Google Routes untuk delivery order; peta visual dan pembatasan truk belum tersedia |
+| `GEMINI_OCR_MODEL` | Override opsional model ekstraksi; default memakai GEMINI_MODEL |
 | `TRUCK_ROUTING_PROVIDER`, `TRUCK_ROUTING_API_KEY` | Slot penyedia routing; adapter belum tersedia |
 | `ELEVATION_API_KEY` | Slot elevasi; adapter belum tersedia |
 | `PORT`, `HOST` | Alamat server; default loopback untuk demo |
@@ -539,3 +551,64 @@ Sebelum suatu tahap disebut selesai, perbarui matriks status, catat validasi yan
 - [MDN PWA installation](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable): persyaratan pemasangan aplikasi web.
 
 Referensi layanan eksternal dapat berubah. Periksa kembali dokumentasi resmi saat implementasi; tanggal dokumen ini bukan jaminan kemampuan layanan di masa depan.
+
+
+## 21. Pembaruan 15 Oktober 2026 — Delivery order, OCR, dan estimasi perjalanan
+
+### Kebutuhan tambahan pengguna
+
+Admin mengunggah delivery order/surat jalan. Gemini membaca dokumen menjadi daftar order dengan beberapa tujuan, lalu admin menugaskan pengemudi dan truk. Jarak harus otomatis dari Google Maps, bukan input manual. Estimasi biaya mencakup maintenance, BBM, dan tol.
+
+### Alur yang sudah diimplementasikan
+
+1. Admin membuka **Delivery orders**, memilih PDF/JPEG/PNG/WebP (maksimum 8 MiB), lalu menekan Extract. Dokumen dikirim ke Gemini pada tindakan tersebut.
+2. Respons terstruktur divalidasi seluruhnya sebelum penyimpanan. Satu dokumen bisa menghasilkan maksimum 20 draft, tiap order 1–10 stop dan maksimum 100 baris cargo. Tidak ada penugasan otomatis berdasarkan teks dokumen.
+3. Admin membandingkan dengan dokumen asli dan memperbaiki reference, pickup, customer, tanggal, setiap alamat/recipient, barang, kuantitas, satuan, dan berat yang tersedia. Nilai yang tidak terbaca tidak boleh dibuat-buat.
+4. Admin memilih driver aktif dan truk yang sudah ditugaskan melalui People & access. Berat order diperiksa terhadap kapasitas deklarasi jika spesifikasi tersedia. Review wajib sebelum penugasan tersimpan.
+5. Saat order reviewed disimpan, frontend meminta Google Routes secara otomatis jika key dikonfigurasi. Pickup, stop antara, dan stop terakhir dikirim sesuai urutan review. Tidak ada kolom input jarak manual.
+6. Sistem menghitung maintenance dari sejarah truk, BBM dari efisiensi dan harga input admin, serta tol dari override admin atau harga driving Google dalam IDR jika tersedia.
+7. Driver melihat order miliknya, memilih Use this delivery order, lalu melengkapi pemeriksaan dan GPS. Semua stop melekat pada trip, dengan final stop sebagai tujuan utama.
+8. Start/complete trip mengubah status order menjadi in transit/completed. Ini bukan bukti penerimaan setiap stop; proof of delivery dan partial delivery belum tersedia.
+
+### Rumus dan sumber
+
+```text
+D = jarak Google Maps, kilometer
+M = CPK maintenance historis truk × D
+F = (D / efisiensi km per liter) × harga IDR per liter
+T = override tol admin jika diisi, atau estimasi tol driving Google jika ada
+Total estimasi = M + F + T
+CPK estimasi perjalanan = (M + F + T) / D
+```
+
+Contoh: D 240 km, maintenance Rp250/km, efisiensi 4 km/liter, BBM Rp10.000/liter, tol Rp150.000. M Rp60.000 + F Rp600.000 + T Rp150.000 = Rp810.000, dengan CPK perjalanan Rp3.375/km. CPK maintenance tetap Rp250/km pada snapshot tersebut.
+
+Jika salah satu komponen tidak diketahui, total tetap unknown. Nol tol harus eksplisit, bukan asumsi karena Google tidak mengembalikan harga. Angka proyeksi tidak ditambahkan ke pengeluaran maintenance aktual. BBM memakai asumsi muatan dari admin; belum ada kalibrasi medan/telematika.
+
+### Batas integrasi yang tetap berlaku
+
+- Google adapter memakai DRIVE traffic-aware, tol diperbolehkan. Rute driving tidak memvalidasi batas tinggi/berat/as truk di Indonesia. Harga tol driving dapat berbeda dengan kelas truk; gunakan override yang sudah diperiksa.
+- Urutan stop mengikuti input; belum ada optimasi urutan, perjalanan kembali, atau waktu bongkar muat. ETA driving dihitung saat permintaan, bukan janji waktu penerimaan pada tanggal delivery.
+- Gemini membaca dokumen; kilometer dan biaya dihitung oleh Google/backend. Gemini tidak menebak jarak atau melatih ulang diri dari dokumen.
+- Adapter truck-safe navigation, elevasi, dan analisis rute Gemini tetap merupakan roadmap, meskipun adapter jarak order sudah ada.
+- Kunci kosong menampilkan not configured. Panggilan gagal mempertahankan order yang telah tersimpan. Pengujian live belum dilakukan dengan API key nyata.
+- Admin dapat menugaskan order meskipun estimate masih unknown. Driver tetap memerlukan approval rute eksternal; estimate bukan persetujuan jalan.
+- Satu order terhubung dengan satu trip. Penggabungan beberapa order ke satu trip, pembatalan, proof of delivery, dan status per-stop belum diimplementasikan.
+
+### Penyimpanan dan akses
+
+`lib/orders.js` menangani validasi, OCR, request Maps, penugasan, biaya, dan hubungan trip. `src/orders.jsx` serta `src/orders.css` menangani UI admin. `server.js` menyediakan `/api/orders`, `/api/orders/extract`, `/api/orders/:id`, dan `/api/orders/:id/estimate`. `test/orders.test.js` menguji kontrak tersebut menggunakan provider mock.
+
+Data runtime bermigrasi dengan menambahkan `orders: []` dan schemaVersion 3 tanpa menghapus riwayat lama. Dokumen asli tidak disimpan: hanya hasil ekstraksi, metadata sumber, hash, peringatan, dan waktu. Upload identik ditolak berdasarkan hash. Simpan dokumen asli secara terpisah jika diperlukan untuk proses perusahaan.
+
+Admin mengelola order. Driver hanya membaca order miliknya; metadata sumber OCR tidak dikirim pada tampilan driver. Manager dan Workshop tidak mendapat data order pada versi ini. Pengubahan order memakai nomor versi; hasil Maps yang tiba setelah order berubah ditolak. Edit order menghapus estimate lama. Setelah trip dimulai, order dan estimate dispatch dibekukan.
+
+### Validasi tambahan
+
+Tes mencakup file salah tipe/terlalu besar, keluaran OCR tidak valid/terpotong, ekstraksi beberapa order, perlindungan duplikat, review wajib, penugasan salah, edit kedaluwarsa, urutan waypoint Google, alamat partial match, provider error, komponen biaya unknown, override tol nol, isolasi role, cargo trip kurang dari order, snapshot semua stop, dan persistence status selesai. Tes tersebut memakai mock, sehingga uji dokumen nyata, key, billing, alamat Indonesia, dan UI perangkat tetap diperlukan.
+
+### Langkah berikutnya
+
+Konfigurasikan GEMINI_API_KEY dan MAPS_API_KEY dengan Routes API aktif; GEMINI_OCR_MODEL opsional. Uji satu surat jalan nyata yang boleh diproses, review seluruh alamat, lalu cocokkan jarak dan estimasi tol dengan operasi perusahaan. Tentukan efisiensi BBM loaded yang representatif untuk tiap truk. Setelah alur dasar tervalidasi, lanjutkan pemilihan truck routing dan kalibrasi medan sesuai roadmap sebelumnya.
+
+Referensi implementasi: [Gemini generateContent](https://ai.google.dev/api/generate-content), [Google computeRoutes](https://developers.google.com/maps/documentation/routes/compute_route_directions), dan [intermediate waypoints](https://developers.google.com/maps/documentation/routes/intermed_waypoints).

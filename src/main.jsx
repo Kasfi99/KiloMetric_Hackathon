@@ -57,7 +57,7 @@ export function App({initialData=null,initialPage='maintenance',onLogout=()=>{}}
   {page==='maintenance'&&<><section className="card workshop-intro"><div><span className="eyebrow">START WITH THE WORKSHOP VISIT</span><h2>A single entry keeps everything in sync.</h2><p>Choose a truck or register one here, enter its odometer, and record the work and costs.</p></div><div className="workshop-flow"><span><Truck size={17}/>1. Identify truck</span><ArrowRight size={14}/><span><Wrench size={17}/>2. Enter service</span><ArrowRight size={14}/><span><Route size={17}/>3. CPK updates</span></div></section><section className="card"><TableHeader title="Maintenance history" count={data.maintenance.length} query={query} setQuery={setQuery} placeholder="Search truck, workshop, or notes…"/><MaintenanceTable records={data.maintenance.filter(m=>matches({...m,truck:data.trucks.find(t=>t.id===m.truckId)?.plate})).sort((a,b)=>b.date.localeCompare(a.date))} data={data} onEdit={r=>open('maintenance',r)} onDelete={r=>setModal({type:'delete',entity:'maintenance',record:r})}/></section></>}
   {page==='optimizer'&&<Optimizer data={data}/>}
   {page==='ai'&&<AI data={data} reload={load} notify={notify}/>}
-  {page==='settings'&&<><SettingsPage data={data}/><IntegrationSettings data={data}/></>}
+  {page==='settings'&&<><SettingsPage data={data}/><IntegrationSettings data={data} reload={load} notify={notify}/></>}
   {page==='trips'&&<TripsPage data={data} reload={load} notify={notify}/>}
   {page==='orders'&&role==='admin'&&<OrdersPage data={data} reload={load} notify={notify}/>}
   {page==='users'&&role==='admin'&&<UsersPage data={data} notify={notify}/>}

@@ -27,6 +27,20 @@ npm start -- --production
 
 The production command serves the built `dist/` frontend. Change `PORT` in `.env` if needed.
 
+### Driver web app
+
+Open **http://localhost:3000/driver** (English UI, built from the design prototype in `kilometric-mobile-ui-en/`). It uses the same API and cookie session as the dashboard. It covers orders, pre-trip checks, route options with the AI explanation on a MapLibre/OpenStreetMap map, the active trip with foreground GPS and an offline point queue, completion, and history. Browsers allow GPS only on HTTPS or localhost, and they stop GPS when the screen locks; the app asks the browser to keep the screen on during a trip. Check the API flow against a running server with `node scripts/smoke-driver-flow.mjs http://localhost:3000` (fresh demo database).
+
+### Testing from a phone on the same Wi-Fi
+
+```sh
+npm run dev:lan
+```
+
+This binds to all interfaces and prints `LAN: http://<laptop-ip>:3000`. Use that URL as `EXPO_PUBLIC_API_URL` for the mobile driver app. Native apps send no `Origin` header and authenticate with a bearer token, so no further setup is needed. To use the **web app** from a phone browser, also add the LAN URL to `APP_ORIGIN` in `.env` (comma-separated); otherwise sign-in and saves are rejected as an untrusted origin. Phone GPS in a browser requires HTTPS except on localhost. Anyone on the network can reach the server while it is bound this way, and the demo passwords are public, so use it only on a trusted network.
+
+A fresh demo database includes three delivery orders (`DO-DEMO-001` to `003`) assigned to `driver@demo.id`. Their addresses are places that the route provider resolves exactly. To reseed an existing database, stop the server, back up `data/fleet.json`, and delete it.
+
 ## Delivery orders, Gemini OCR, and dispatch
 
 Admin → **Delivery orders** accepts PDF/JPEG/PNG/WebP documents up to 8 MiB. Click **Extract draft orders** to send the selected document to Gemini. It extracts up to 20 distinct orders, each with up to 10 ordered stops and 100 cargo lines. The server validates the structured result before saving any drafts. Unreadable/missing values stay blank or unknown; admin must review and confirm the reference, pickup, every stop address, and cargo before assignment. The same file hash cannot be imported twice. A manual-entry workflow works without Gemini.
@@ -129,6 +143,10 @@ API documentation: https://ai.google.dev/api/generate-content
 
 `data/fleet.json` is created with sample data on first launch, updated atomically, and survives restarts. Settings → Export data backup downloads a business-data snapshot without password hashes. For a full recovery backup including users and GPS point history, stop the server and copy `data/fleet.json` securely. The UI export is for review, not full restoration: it excludes authentication records and includes only the latest GPS point per trip. Restore from the full server file instead.
 
+To restore the demo state (fresh sample data, demo accounts, three assigned demo orders), stop the server and run `npm run demo:reset`. It moves `data/fleet.json` and `data/photos/` into `data/backups/<timestamp>/`, and the server reseeds on the next start. It refuses to run while a server answers on `PORT` (default 3000), because the running server would write its in-memory data back. Signed-in phones must sign in again.
+
+To demo GPS tracking in the Android emulator, start a trip with a planned route and run `npm run demo:drive -- [steps|all] [stepM] [intervalS]` (default 30 steps of 250 m every 10 s, about 90 km/h). It moves the emulator location along the planned route with `adb emu geo fix`, resuming from the last accepted point. Env: `PORT`/`BASE_URL`, `ANDROID_SERIAL` (default `emulator-5554`), `ADB`.
+
 For an empty workspace, stop the server and replace the file with this object after backing up existing data:
 
 ```json
@@ -142,14 +160,14 @@ For an empty workspace, stop the server and replace the file with this object af
 
 ## Sign-in and role access
 
-The default local demo creates these public accounts on first migration. Their original sign-in addresses and passwords are retained for compatibility with existing demo data after the KiloMetric rename. All use **FleetwiseDemo!2026**:
+The default local demo creates these public accounts on first migration. All use **demo1234**. Databases created before 17 Oct 2026 used `<role>@fleetwise.local` / `FleetwiseDemo!2026`. On startup in demo mode, those accounts are moved to the new credentials, but only if they still use that old public password:
 
 | Email | Role | Access |
 | --- | --- | --- |
-| admin@fleetwise.local | Admin | Fleet, maintenance, insights, trips, users and assignments |
-| manager@fleetwise.local | Manager | Fleet, maintenance, insights and trip oversight |
-| workshop@fleetwise.local | Workshop | Trucks, spare parts and maintenance |
-| driver@fleetwise.local | Driver | Assigned trucks and own trips only |
+| admin@demo.id | Admin | Fleet, maintenance, insights, trips, users and assignments |
+| manager@demo.id | Manager | Fleet, maintenance, insights and trip oversight |
+| workshop@demo.id | Workshop | Trucks, spare parts and maintenance |
+| driver@demo.id | Driver | Assigned trucks and own trips only |
 
 The initial driver is assigned the first two sample trucks. Admin → **People & access** creates accounts, assigns trucks, changes roles, resets passwords, and disables accounts. Passwords are salted scrypt hashes; session tokens are stored server-side and supplied through HttpOnly/SameSite=Strict cookies. Sessions expire after 12 hours or a server restart. Account updates revoke existing sessions. There is no self-registration.
 
@@ -168,11 +186,12 @@ Each driver/truck can have only one active trip. Drivers cannot start trips for 
 
 Completed trip maintenance estimate is **historical truck maintenance CPK at departure × completed odometer distance**. It is an estimate, not a new maintenance charge. It excludes fuel, tolls, and terrain adjustment. Recorded maintenance expenses remain the source of actual CPK.
 
-## Map, routing, terrain and Gemini placeholders
+## Driver route alternatives, map and terrain
 
 `.env.example` and Settings expose configuration slots:
 
 ```env
+ORS_API_KEY=
 MAPS_API_KEY=
 TRUCK_ROUTING_PROVIDER=
 TRUCK_ROUTING_API_KEY=
@@ -180,7 +199,28 @@ ELEVATION_API_KEY=
 GEMINI_API_KEY=
 ```
 
-Routing policy is **fastest arrival with toll roads allowed**. Admin delivery-order Google driving distance/ETA and optional driving toll estimates are implemented behind MAPS_API_KEY. Map tiles, truck-restriction routing, elevation, uphill/downhill costs and Gemini route reasoning remain unimplemented. `/api/routes/preview` returns a clear unavailable response, never a fabricated route. The order-distance adapter uses a Routes-enabled key; the other placeholders still need adapters. The existing Gemini maintenance analyst remains available when its key is configured.
+Routing policy is **fastest arrival with toll roads allowed**. Admin delivery-order Google driving distance/ETA and optional driving toll estimates are implemented behind MAPS_API_KEY.
+
+`POST /api/routes/preview` (driver, manager, admin) returns truck-aware route candidates from the OpenRouteService `driving-hgv` profile when `ORS_API_KEY` is set. The request sends the declared height, width, length, gross weight and hazmat flag. Per-axle load is not declared, so it is not sent and is listed as unknown. Bridge limits, truck bans and time restrictions are always listed as unknown. Toll cost is unknown. Gemini, when configured, explains the candidates as structured JSON; the server rejects any explanation that names a route id outside the candidates. The response contract is `design.md` §4.6.
+
+Limits observed against the live free ORS service (16 Oct 2026):
+
+- Alternatives (up to 3) are requested only when the straight-line trip is ≤ 70 km; ORS rejects alternatives above about 100 km road distance. Longer trips, multi-stop trips, and alternative requests that fail or time out return one route with a warning.
+- Indonesian geocoding is weak. Street addresses often resolve only to the city centroid, and a named place can resolve to the wrong venue with full confidence. Each stop carries `geocodePrecision` (`exact` for venue/street/address matches, otherwise `approximate`) and the label that was actually found; approximate stops add a warning to every route. A stop that is not found returns 422.
+- Routes whose road distance exceeds 3× the straight-line distance (+30 km) are dropped as implausible.
+- Without a key, or when ORS fails, the endpoint returns two fixture routes clearly labelled "Rute contoh".
+
+### Route cost and recommendation
+
+Each candidate carries `roadCondition` (paved, rough, unknown-surface, steep and ferry km from ORS `extra_info`) and `cost`: maintenance = the truck's historical CPK × km, fuel = km ÷ the order's km/l × IDR/l, toll unknown. Pass `truckId` (or use an order) so the server can look up the CPK. If any component is unknown the total and trip CPK stay unknown. Admins can set a rough-road maintenance factor (1–3, `PUT /api/settings`). It multiplies CPK on rough km only. It is an uncalibrated assumption and is reported with every cost. The backend picks the recommended route: lowest total cost when every route has one, otherwise the fastest. Gemini only explains that choice, and an explanation that recommends another route is rejected. Measured on demo Jakarta routes, surfaces are mostly asphalt/concrete or unknown, so the factor rarely changes the ranking.
+
+### Odometer photo evidence
+
+The driver photographs the odometer at departure and arrival. `POST /api/odometer/read` sends the photo to Gemini (`GEMINI_ROUTE_MODEL`, a fast model; the slower flash model timed out on hard images). Gemini reads the number, and the backend compares it with the typed value (±1 km). A mismatch or an unreadable photo needs a reason from the driver. The typed value stays the official odometer. The check id is single-use, expires after 30 minutes and is tied to the typed value. Evidence is stored on `trip.odometerEvidence.{start,end}` and the photo under `data/photos/` (mode 0600). The web trip register flags mismatches.
+
+A driver may start a trip with a `routePlan` snapshot of the chosen candidate; it is stored on `trip.routing.plan`. Dispatcher approval is still required (`externalRouteConfirmed`). In-app candidates are provider estimates, not approvals. Map tiles in the web app, turn-by-turn navigation, uphill/downhill costs and Google truck routing remain unimplemented.
+
+Mobile clients sign in with `POST /api/login` and `client: "mobile"`. That returns a session token for `Authorization: Bearer`, with the same server-side store, 12-hour expiry and revocation as the web cookie.
 
 Choose a truck-routing provider with verified Indonesian restriction coverage. Google’s documented large-vehicle routing is currently available in the contiguous US and Japan, not Indonesia: https://developers.google.com/maps/documentation/routes/lvr . Before route analysis can be built, route geometry, restriction compliance and elevation data must come from the chosen provider. Gemini can explain grounded alternatives; it must not invent truck-safe routes or grade-cost multipliers.
 

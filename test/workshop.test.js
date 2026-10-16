@@ -16,7 +16,7 @@ test('workshop registration, automatic CPK, corrections, backdating and atomic r
    const req=Readable.from(body?[JSON.stringify(body)]:[]);Object.assign(req,{url,method,headers:{cookie}});let status=200;
    handleRequest(req,{writeHead(code){status=code;},setHeader(name,value){if(name==='set-cookie')cookie=value.split(';')[0];},end(text){resolve({status,data:JSON.parse(text)});}}).catch(reject);
   });
-  assert.equal((await call('/api/login','POST',{email:'admin@fleetwise.local',password:'FleetwiseDemo!2026'})).status,200);
+  assert.equal((await call('/api/login','POST',{email:'admin@demo.id',password:'demo1234'})).status,200);
   const state=async()=> (await call('/api/state')).data;
   const initial=await state();
   const first={truckId:'__new__',newTruck:{plate:'WORKSHOP 01',model:'Hino 500',duty:'Regional haul'},date:'2025-01-10',odometer:100000,workshop:'Staff workshop',notes:'First visit',labor:1000000,otherCost:0,items:[]};

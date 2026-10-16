@@ -4,8 +4,27 @@ import {Readable} from 'node:stream';
 import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {seed} from '../lib/seed.js';
-import {documentInput,extractOrders,googleOrderRoute,estimateCosts,newOrder,reviseOrder} from '../lib/orders.js';
+import {seed,demoOrders} from '../lib/seed.js';
+import {demoUsers} from '../lib/auth.js';
+import {documentInput,extractOrders,googleOrderRoute,estimateCosts,newOrder,reviseOrder,orderFields,attachOrderToTrip} from '../lib/orders.js';
+
+test('demo orders: assigned to the demo driver on their trucks, valid fields, ready to start',()=>{
+ const db=seed();db.users=demoUsers(db.trucks);db.trips=[];
+ const orders=demoOrders(db.users),driver=db.users.find(u=>u.role==='driver'),admin=db.users.find(u=>u.role==='admin');
+ assert.equal(orders.length,3);assert.equal(new Set(orders.map(o=>o.reference)).size,3);
+ for(const o of orders){
+  assert.equal(o.status,'assigned');assert.equal(o.driverId,driver.id);assert.ok(driver.assignedTruckIds.includes(o.truckId));
+  assert.ok(o.reviewedAt);assert.equal(o.reviewedBy,admin.id);assert.equal(o.source.kind,'demo_seed');assert.equal(o.estimate,null);
+  assert.deepEqual(orderFields(o),Object.fromEntries(Object.keys(orderFields(o)).map(k=>[k,o[k]])),'fields survive the same validation as manual orders');
+  assert.match(o.customer,/demo/i,'fictional customers are labelled demo');assert.ok(o.deliveryDate>=new Date().toISOString().slice(0,10));
+ }
+ assert.ok(orders.some(o=>o.stops.length>1),'one multi-stop order');
+ // The driver can start a trip from a demo order with the order's truck and cargo.
+ const order=orders[0],trip={id:'t',truckId:order.truckId,specs:{loadKg:order.cargoWeightKg}};
+ const copy={...db,orders:structuredClone(orders)};attachOrderToTrip(copy,{orderId:order.id},driver,trip);
+ assert.equal(copy.orders[0].status,'in_transit');assert.equal(trip.destination,order.stops.at(-1).address);
+ assert.deepEqual(demoOrders([]),[],'no demo driver → no orders');
+});
 
 const fields={reference:'DO-101',customer:'PT Contoh',deliveryDate:'2026-10-15',pickupAddress:'Depot Jakarta, Indonesia',cargoWeightKg:4000,notes:'Handle carefully',stops:[{recipient:'A',address:'Warehouse Bekasi, Indonesia',contact:'',notes:''},{recipient:'B',address:'Warehouse Bandung, Indonesia',contact:'',notes:''}],items:[{description:'Boxes',quantity:20,unit:'box'}]};
 const file={name:'delivery.pdf',mimeType:'application/pdf',data:Buffer.from('%PDF-1.7\nDelivery order fixture').toString('base64')};
@@ -58,7 +77,7 @@ test('review and assignment require valid date, version, active driver and assig
 
 test('admin OCR to multi-stop dispatch: RBAC, duplicate protection, automatic Maps estimates, trip completion and persistence',async()=>{
  const dir=await mkdtemp(path.join(os.tmpdir(),'kilometric-orders-'));
- Object.assign(process.env,{DATA_FILE:path.join(dir,'fleet.json'),GEMINI_API_KEY:'fake-ocr-key',MAPS_API_KEY:'fake-maps-key',DISABLE_GEMINI:'0',FLEETWISE_NO_LISTEN:'1'});
+ Object.assign(process.env,{DATA_FILE:path.join(dir,'fleet.json'),GEMINI_API_KEY:'fake-ocr-key',MAPS_API_KEY:'fake-maps-key',DISABLE_GEMINI:'0',DISABLE_ORS:'1',DEMO_ORDERS:'0',FLEETWISE_NO_LISTEN:'1'});
  const originalFetch=globalThis.fetch;let ocrMode='valid',mapsMode='valid',ocrCalls=0;
  globalThis.fetch=async(url,options)=>{
   const body=JSON.parse(options.body);
@@ -70,7 +89,7 @@ test('admin OCR to multi-stop dispatch: RBAC, duplicate protection, automatic Ma
   const {handleRequest}=await import('../server.js');
   function client(){let cookie='';return (url,method='GET',body)=>new Promise((resolve,reject)=>{const req=Readable.from(body?[JSON.stringify(body)]:[]);Object.assign(req,{url,method,headers:{cookie}});let status=200;handleRequest(req,{writeHead(code){status=code;},setHeader(name,value){if(name==='set-cookie')cookie=value.split(';')[0];},end(text){resolve({status,data:JSON.parse(text)});}}).catch(reject);});}
   const admin=client(),driver=client(),manager=client(),workshop=client();
-  for(const [call,role] of [[admin,'admin'],[driver,'driver'],[manager,'manager'],[workshop,'workshop']])assert.equal((await call('/api/login','POST',{email:`${role}@fleetwise.local`,password:'FleetwiseDemo!2026'})).status,200);
+  for(const [call,role] of [[admin,'admin'],[driver,'driver'],[manager,'manager'],[workshop,'workshop']])assert.equal((await call('/api/login','POST',{email:`${role}@demo.id`,password:'demo1234'})).status,200);
   for(const call of [driver,manager,workshop])assert.equal((await call('/api/orders/extract','POST',file)).status,403);
   assert.equal(ocrCalls,0);
   ocrMode='invalid';assert.equal((await admin('/api/orders/extract','POST',file)).status,502);assert.equal((await admin('/api/state')).data.orders.length,0);

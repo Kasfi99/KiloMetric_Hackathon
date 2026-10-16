@@ -16,7 +16,7 @@ test('API handlers: CRUD, validation, CPK recalculation, origin protection, and 
    let status=200;const res={writeHead(code){status=code;},setHeader(name,value){if(name==='set-cookie')cookie=value.split(';')[0];},end(text){try{resolve({status,data:JSON.parse(text)});}catch(e){reject(e);}}};
    handleRequest(req,res).catch(reject);
   });
-  assert.equal((await call('/api/login','POST',{email:'admin@fleetwise.local',password:'FleetwiseDemo!2026'})).status,200);
+  assert.equal((await call('/api/login','POST',{email:'admin@demo.id',password:'demo1234'})).status,200);
   const initial=(await call('/api/state')).data;assert.equal(initial.trucks.length,6);
   const truck={plate:'TEST 01',model:'Hino 500',duty:'Regional haul',baselineDate:'2025-01-01',baselineOdometer:1000,odometer:3000};
   assert.equal((await call('/api/trucks','POST',truck,'https://evil.example')).status,403);
@@ -43,4 +43,25 @@ test('API handlers: CRUD, validation, CPK recalculation, origin protection, and 
   assert.equal((await call('/api/state')).data.analytics.totalSpend,initial.analytics.totalSpend);
   assert.equal(JSON.parse(await readFile(process.env.DATA_FILE,'utf8')).trucks.length,6);
  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('mobile login returns a bearer token that authenticates without cookies',async()=>{
+ const {handleRequest}=await import('../server.js');
+ const call=(url,method='GET',body,headers={})=>new Promise((resolve,reject)=>{
+  const req=Readable.from(body?[JSON.stringify(body)]:[]);req.url=url;req.method=method;req.headers={...headers};
+  let status=200,setCookie=null;const res={writeHead(code){status=code;},setHeader(name,value){if(name==='set-cookie')setCookie=value;},end(text){try{resolve({status,data:JSON.parse(text),setCookie});}catch(e){reject(e);}}};
+  handleRequest(req,res).catch(reject);
+ });
+ const login=await call('/api/login','POST',{email:'driver@demo.id',password:'demo1234',client:'mobile'});
+ assert.equal(login.status,200);assert.match(login.data.token,/^[a-f0-9]{64}$/);assert.equal(login.setCookie,null,'mobile login must not set a cookie');
+ assert.equal((await call('/api/state')).status,401);
+ const state=await call('/api/state','GET',undefined,{authorization:`Bearer ${login.data.token}`});
+ assert.equal(state.status,200);assert.equal(state.data.currentUser.role,'driver');
+ assert.deepEqual(state.data.orders.map(o=>o.reference),['DO-DEMO-001','DO-DEMO-002','DO-DEMO-003'],'fresh demo database seeds assigned demo orders');
+ assert.ok(state.data.orders.every(o=>o.status==='assigned'&&!('source' in o)));
+ assert.equal((await call('/api/state','GET',undefined,{authorization:'Bearer deadbeef'})).status,401);
+ assert.equal((await call('/api/logout','POST',undefined,{authorization:`Bearer ${login.data.token}`})).status,200);
+ assert.equal((await call('/api/state','GET',undefined,{authorization:`Bearer ${login.data.token}`})).status,401,'logout must revoke the bearer token');
+ const web=await call('/api/login','POST',{email:'driver@demo.id',password:'demo1234'});
+ assert.equal(web.status,200);assert.equal(web.data.token,undefined);assert.match(web.setCookie,/^fleetwise_session=/);
 });

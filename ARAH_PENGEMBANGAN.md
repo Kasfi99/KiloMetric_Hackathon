@@ -66,8 +66,11 @@ Gunakan empat label berikut saat mendiskusikan pekerjaan:
 | Kerangka PWA dan halaman offline | Tersedia | Belum diuji pemasangan pada ponsel nyata; tidak ada antrean input offline |
 | OCR delivery order dan penugasan | Tersedia, opsional Gemini | Draft perlu review admin; multi-stop; driver/truk sesuai penugasan |
 | Jarak/ETA delivery order Google Maps | Tersedia, membutuhkan key | DRIVE, urutan stop tetap; belum verifikasi batas truk |
-| Peta visual, navigasi, truck routing | Placeholder | Adapter truck routing masih perlu diimplementasikan |
-| Elevasi, biaya tanjakan/turunan, analisis rute Gemini | Placeholder/rencana | Belum ada data atau model biaya terkalibrasi |
+| Alternatif rute truk untuk driver (ORS `driving-hgv`) | Tersedia, membutuhkan `ORS_API_KEY` | Restriksi OSM Indonesia parsial; beban as, jembatan, larangan truk, jam operasi tidak diketahui; tol tidak diketahui; alternatif hanya ≤ ±70 km garis lurus; geocoding alamat jalan sering hanya pusat kota |
+| Penjelasan rute oleh Gemini | Tersedia, opsional | Hanya menjelaskan kandidat provider; id di luar kandidat ditolak; kuota/akses model menentukan ketersediaan |
+| Aplikasi mobile driver (React Native/Expo) | Rencana, spesifikasi di `design.md` | Login bearer, rute, GPS foreground/background, antrean offline |
+| Peta visual web, navigasi turn-by-turn | Placeholder | Driver diarahkan membuka Google Maps/Waze |
+| Elevasi sebagai biaya, biaya tanjakan/turunan | Rencana | Ada total tanjakan/turunan dari ORS, tetapi belum ada model biaya terkalibrasi |
 | Database produksi, audit trail, multi-perusahaan | Rencana | Belum ada dalam demo |
 
 Pada pembaruan delivery order, 19 tes otomatis dengan mock provider dan build produksi berhasil. Pengujian tersebut tidak membuktikan akurasi rute Indonesia, GPS pada perangkat nyata, instalasi PWA, atau kualitas jawaban Gemini live. Pembaruan runtime delivery order dijelaskan pada bagian 21.
@@ -612,3 +615,57 @@ Tes mencakup file salah tipe/terlalu besar, keluaran OCR tidak valid/terpotong, 
 Konfigurasikan GEMINI_API_KEY dan MAPS_API_KEY dengan Routes API aktif; GEMINI_OCR_MODEL opsional. Uji satu surat jalan nyata yang boleh diproses, review seluruh alamat, lalu cocokkan jarak dan estimasi tol dengan operasi perusahaan. Tentukan efisiensi BBM loaded yang representatif untuk tiap truk. Setelah alur dasar tervalidasi, lanjutkan pemilihan truck routing dan kalibrasi medan sesuai roadmap sebelumnya.
 
 Referensi implementasi: [Gemini generateContent](https://ai.google.dev/api/generate-content), [Google computeRoutes](https://developers.google.com/maps/documentation/routes/compute_route_directions), dan [intermediate waypoints](https://developers.google.com/maps/documentation/routes/intermed_waypoints).
+
+## 22. Pembaruan 16 Oktober 2026 — Aplikasi driver dan alternatif rute
+
+### Keputusan
+
+Tim membangun aplikasi mobile driver (React Native + Expo) dan menyambungkan Gemini dengan peta. Pembagian tanggung jawab tetap sesuai §11: provider routing menghitung kandidat rute, Gemini hanya menjelaskan. Google Maps key tidak tersedia, sehingga provider yang dipakai adalah OpenRouteService profil `driving-hgv`, dengan rute contoh (fixture) berlabel jelas sebagai fallback. Spesifikasi lengkap aplikasi dan kontrak API ada di `design.md`; rencana desain di `docs/plans/2026-10-16-driver-app-routing-design.md`.
+
+### Yang diimplementasikan di backend
+
+- Login mobile: `POST /api/login` dengan `client: "mobile"` mengembalikan token untuk header `Authorization: Bearer`. Penyimpanan sesi, masa berlaku 12 jam, dan pencabutan sama dengan cookie web.
+- `POST /api/routes/preview` menggantikan placeholder 503: geocoding stop, kandidat rute truk dengan dimensi dan berat deklarasi, penjelasan Gemini yang divalidasi, serta fallback fixture.
+- `routePlan`: snapshot rute yang dipilih driver disimpan pada `trip.routing.plan` saat trip dimulai. Persetujuan dispatcher eksternal tetap wajib.
+
+### Temuan uji live (16 Oktober 2026)
+
+| Uji | Hasil |
+| --- | --- |
+| Jakarta Selatan → Cikarang (±36 km garis lurus) | 3 alternatif, 49–54 km, 55–58 menit |
+| Jakarta Selatan → Kawasan Industri Pulogadung | 3 alternatif, geocode `exact` (venue) |
+| Jakarta Selatan → Bandung (168 km) | ORS menolak alternatif di atas ±100 km; satu rute 168 km/144 menit beserta peringatan |
+| Multi-stop dengan titik di laut | ORS mengembalikan 3108 km; kini dibuang oleh pemeriksaan kewajaran |
+| Geocoding "Jl. Asia Afrika No. 8, Bandung" | Hanya pusat kota Bandung (confidence 0.6) → ditandai `approximate` |
+| Geocoding "Pelabuhan Tanjung Priok" | Salah tempat (Muara Angke) dengan confidence 1.0 → label hasil wajib ditampilkan ke driver |
+| Gemini `gemini-3.8-flash` | Kuota key habis (429) saat uji; kartu AI menampilkan "tidak tersedia" dan rute tetap tampil |
+
+### Batas yang tetap berlaku
+
+Beban per as tidak dideklarasikan, sehingga tidak dikirim ke provider dan ditampilkan sebagai belum diketahui. Batas jembatan, larangan truk, dan jam operasi tidak diperiksa. Tol tidak diketahui. Alternatif rute hanya untuk perjalanan pendek. Alamat order perlu menyebut nama tempat yang dikenal (kawasan industri, gudang bernama) agar geocoding akurat. Kandidat rute adalah estimasi provider, bukan persetujuan jalan.
+
+## 23. Pembaruan 17 Oktober 2026 — Biaya rute, kondisi jalan, dan foto odometer
+
+Desain: `docs/plans/2026-10-17-route-cost-odometer-ocr-design.md`. Kontrak API: `design.md` §4.6, §4.7, §4.9–§4.11.
+
+### Yang diimplementasikan
+
+- **CPK lebih menonjol** di app driver: pre-trip, detail trip, dan akun.
+- **Kondisi jalan per rute** dari ORS `extra_info` (surface, waytype, steepness): km beraspal, rusak, tidak diketahui, menanjak, dan feri.
+- **Biaya per rute.** Maintenance = CPK historis truk × km, BBM = km ÷ km/l × harga/l dari order, tol belum diketahui. Komponen yang tidak diketahui membuat total ikut tidak diketahui.
+- **Faktor jalan rusak** diisi admin (1–3, atau kosong). Faktor ini mengalikan CPK hanya pada km jalan rusak. Nilainya asumsi yang belum dikalibrasi dan selalu ditampilkan bersama hasilnya.
+- **Rekomendasi rute ditentukan backend.** Rute dengan biaya total terendah dipilih jika semua rute punya total; jika tidak, rute tercepat. Gemini hanya menjelaskan, dan jawaban yang merekomendasikan rute lain ditolak.
+- **Foto odometer** saat berangkat dan tiba. Gemini membaca angka, backend membandingkan (±1 km). Jika tidak cocok atau tidak terbaca, driver wajib memberi alasan. Angka ketikan tetap resmi. Bukti tersimpan di `trip.odometerEvidence`, dan register trip web menandai ketidakcocokan.
+
+### Temuan uji (17 Oktober 2026)
+
+| Uji | Hasil |
+| --- | --- |
+| ORS `extra_info` + alternatif, rute demo Jakarta | 4–7 detik; permukaan sebagian besar aspal/beton atau tidak diketahui (hingga 53%), hampir tanpa ruas rusak. Faktor jalan rusak jarang mengubah biaya demo |
+| OCR odometer LCD bersih (gambar sintetis), `gemini-flash-lite-latest` | Terbaca tepat (124587), ±2 detik |
+| OCR 7-segmen dengan segmen mati yang samar | Lite salah baca (2458) → *mismatch*, tidak pernah *match* palsu. Model flash berpikir >20 detik lalu timeout. Lite tetap dipakai |
+| Kamera emulator Android | Mengembalikan gambar ruangan virtual → *unreadable*; demo di emulator memakai galeri (khusus mode dev) |
+
+### Batas
+
+Akurasi OCR pada foto odometer asli belum diuji. Gambar uji di atas sintetis, jadi perlu foto dashboard truk sungguhan sebelum pilot. Data permukaan jalan OSM di Indonesia banyak yang kosong, sehingga km "tidak diketahui" tidak dihitung sebagai jalan rusak. Faktor jalan rusak belum dikalibrasi dengan data bengkel.

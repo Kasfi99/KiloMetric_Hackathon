@@ -17,7 +17,7 @@ test('Gemini receives current metrics, persists analysis, and handles quota fail
    const req=Readable.from(method==='POST'?[JSON.stringify(payload)]:[]);req.url=url;req.method=method;req.headers={cookie};let status=200;
    handleRequest(req,{writeHead(code){status=code;},setHeader(name,value){if(name==='set-cookie')cookie=value.split(';')[0];},end(text){resolve({status,data:JSON.parse(text)});}}).catch(reject);
   });
-  assert.equal((await call('/api/login','POST',{email:'admin@fleetwise.local',password:'FleetwiseDemo!2026'})).status,200);
+  assert.equal((await call('/api/login','POST',{email:'admin@demo.id',password:'demo1234'})).status,200);
   async function waitFor(status){for(let i=0;i<100;i++){const state=(await call('/api/state')).data;if(state.ai.status===status)return state;await new Promise(r=>setTimeout(r,10));}throw new Error(`AI did not reach ${status}`);}
   assert.equal((await call('/api/analyze','POST')).status,202);
   const state=await waitFor('ready');assert.equal(state.ai.revision,state.revision);assert.ok(state.ai.text.includes('Sample fleet'));

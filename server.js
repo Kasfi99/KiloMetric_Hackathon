@@ -3,13 +3,17 @@ import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { seed } from './lib/seed.js';
+import { networkInterfaces } from 'node:os';
+import { seed, demoOrders } from './lib/seed.js';
 import { analytics } from './lib/analytics.js';
 import { normalize, validate } from './lib/validation.js';
 import { rememberReportedMileage, syncWorkshopMileage } from './lib/workshop.js';
-import {roles,hashPassword,verifyPassword,publicUser,demoUsers,sessionManager,sessionCookie,canManageFleet,visibleData} from './lib/auth.js';
+import {roles,hashPassword,verifyPassword,publicUser,demoUsers,migrateLegacyDemoAccounts,sessionManager,sessionCookie,canManageFleet,visibleData} from './lib/auth.js';
 import {createTrip,addLocations,completeTrip,truckSpecifications,locationPoint} from './lib/trips.js';
 import {documentInput,extractOrders,newOrder,reviseOrder,googleOrderRoute,estimateCosts,attachOrderToTrip,completeOrderForTrip} from './lib/orders.js';
+import {previewRoutes,routeStops} from './lib/routing.js';
+import {LANGS} from './lib/route-messages.js';
+import {photoInput,readOdometer,compareOdometer,consumeCheck} from './lib/odometer.js';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
 try { for(const line of (await readFile(path.join(root,'.env'),'utf8')).split('\n')) { const m=line.match(/^([A-Z_]+)\s*=\s*(.*)$/); if(m&&!process.env[m[1]]) process.env[m[1]]=m[2].trim().replace(/^['"]|['"]$/g,''); } } catch(e) { if(e.code!=='ENOENT') throw e; }
@@ -20,18 +24,23 @@ let db;
 try { db=JSON.parse(await readFile(dataFile,'utf8')); validate(db); } catch(e) { if(e.code!=='ENOENT') throw e; db=seed(); validate(db); await writeFile(dataFile,JSON.stringify(db,null,2),{mode:0o600}); }
 const demoMode=process.env.DEMO_MODE!=='0';
 if(!db.users){
-  if(demoMode)db.users=demoUsers(db.trucks);
+  if(demoMode){db.users=demoUsers(db.trucks);if(process.env.DEMO_ORDERS!=='0'&&!db.orders?.length)db.orders=demoOrders(db.users);}
   else {
     if(!process.env.ADMIN_EMAIL||!process.env.ADMIN_PASSWORD||process.env.ADMIN_PASSWORD.length<12)throw new Error('Set ADMIN_EMAIL and ADMIN_PASSWORD (12+ characters) to initialize non-demo accounts.');
     db.users=[{id:randomUUID(),name:'Administrator',email:process.env.ADMIN_EMAIL.trim().toLowerCase(),role:'admin',active:true,assignedTruckIds:[],passwordHash:hashPassword(process.env.ADMIN_PASSWORD)}];
   }
 }
-db.trips??=[];db.orders??=[];db.schemaVersion=3;
+if(demoMode&&migrateLegacyDemoAccounts(db.users))console.log('Demo accounts renamed to <role>@demo.id with password demo1234.');
+db.trips??=[];db.orders??=[];db.settings??={roughRoadFactor:null};db.schemaVersion=3;
 await writeFile(dataFile,JSON.stringify(db,null,2),{mode:0o600});
 const sessions=sessionManager();
 const secureCookie=process.env.COOKIE_SECURE==='1';
 const allowedOrigins=new Set([`http://localhost:${port}`,`http://127.0.0.1:${port}`,...(process.env.APP_ORIGIN||'').split(',').map(v=>v.trim()).filter(Boolean)]);
-const integrations=()=>({maps:{keyConfigured:Boolean(process.env.MAPS_API_KEY),status:process.env.MAPS_API_KEY?'order_distance_configured':'not_configured'},routing:{keyConfigured:Boolean(process.env.TRUCK_ROUTING_API_KEY),provider:process.env.TRUCK_ROUTING_PROVIDER||'Not selected',status:'not_connected',priority:'fastest',tollsAllowed:true},elevation:{keyConfigured:Boolean(process.env.ELEVATION_API_KEY),status:'not_connected'}});
+const orsKey=()=>process.env.DISABLE_ORS==='1'?'':process.env.ORS_API_KEY||'';
+// Odometer photo checks wait here (bytes included) until a trip start/complete uses them; photos are written only then.
+const odometerChecks=new Map(),odometerAttempts=new Map(),CHECK_TTL_MS=30*60*1000,photosDir=path.join(path.dirname(dataFile),'photos');
+const takeCheck=id=>{const c=typeof id==='string'?odometerChecks.get(id):undefined;return c&&Date.now()-Date.parse(c.at)<=CHECK_TTL_MS?c:undefined;};
+const integrations=()=>({maps:{keyConfigured:Boolean(process.env.MAPS_API_KEY),status:process.env.MAPS_API_KEY?'order_distance_configured':'not_configured'},routing:{keyConfigured:Boolean(orsKey()),provider:orsKey()?'ors':'fixture',status:orsKey()?'connected':'fixture_only',priority:'fastest',tollsAllowed:true,truckRestrictionsSource:orsKey()?'openrouteservice_hgv_profile':'none'},elevation:{keyConfigured:Boolean(process.env.ELEVATION_API_KEY),status:'not_connected'}});
 let queue=Promise.resolve();
 function transaction(fn) { const job=queue.then(async()=>{const next=structuredClone(db); const result=await fn(next); await writeFile(dataFile+'.tmp',JSON.stringify(next,null,2),{mode:0o600}); await rename(dataFile+'.tmp',dataFile); db=next; return result;}); queue=job.catch(()=>{}); return job; }
 const configured=Boolean(process.env.GEMINI_API_KEY)&&process.env.DISABLE_GEMINI!=='1';
@@ -66,6 +75,8 @@ const vite=production||noListen?null:await (await import('vite')).createServer({
 export async function handleRequest(req,res){
   const url=new URL(req.url,`http://localhost:${port}`);
   if(!url.pathname.startsWith('/api/')) {
+    // Driver web app (public/driver). Vite's SPA fallback would otherwise serve the admin app for /driver/.
+    if(url.pathname==='/driver'||url.pathname==='/driver/'){res.writeHead(302,{location:'/driver/index.html'});res.end();return;}
     if(vite) return vite.middlewares(req,res);
     const target=url.pathname==='/'?'index.html':url.pathname.slice(1);
     const filename=path.resolve(root,'dist',target);
@@ -83,7 +94,9 @@ export async function handleRequest(req,res){
       const input=await body(req);
       const account=db.users.find(u=>u.email===String(input.email||'').trim().toLowerCase()&&u.active);
       if(typeof input.password!=='string'||input.password.length>200||!account||!verifyPassword(input.password,account.passwordHash))return json(res,401,{error:'Invalid email or password.'});
-      sessions.revoke(req);res.setHeader('set-cookie',sessionCookie(sessions.issue(account.id),secureCookie));return json(res,200,{user:publicUser(account)});
+      sessions.revoke(req);const token=sessions.issue(account.id);
+      if(input.client==='mobile')return json(res,200,{user:publicUser(account),token});
+      res.setHeader('set-cookie',sessionCookie(token,secureCookie));return json(res,200,{user:publicUser(account)});
     }
     if(!user)return json(res,401,{error:'Please sign in to continue.'});
     if(req.method==='POST'&&url.pathname==='/api/logout'){sessions.revoke(req);res.setHeader('set-cookie',sessionCookie('',secureCookie));return json(res,200,{ok:true});}
@@ -164,6 +177,24 @@ export async function handleRequest(req,res){
       });
       if(id)sessions.revokeUser(id);return json(res,200,{ok:true});
     }
+    if(req.method==='POST'&&url.pathname==='/api/odometer/read'){
+      if(user.role!=='driver')return json(res,403,{error:'Only drivers can check odometer photos.'});
+      const now=Date.now(),attempt=odometerAttempts.get(user.id);
+      if(attempt&&attempt.until>now&&attempt.count>=10)return json(res,429,{error:'Too many photo checks. Try again in a minute.'});
+      odometerAttempts.set(user.id,{until:attempt?.until>now?attempt.until:now+60000,count:attempt?.until>now?attempt.count+1:1});
+      const input=await body(req,5*1024*1024);
+      if(!['start','end'].includes(input.stage))throw new Error('Odometer photo stage must be start or end.');
+      const typedKm=Number(input.typedKm);
+      if(input.typedKm===''||input.typedKm===null||!Number.isFinite(typedKm)||typedKm<0||typedKm>1e12)throw new Error('Enter the odometer value before checking the photo.');
+      const photo=photoInput(input.image);
+      const read=await readOdometer(photo,{apiKey:configured?process.env.GEMINI_API_KEY:'',model:process.env.GEMINI_ROUTE_MODEL||model});
+      const status=compareOdometer(typedKm,read),checkId=randomUUID();
+      for(const [key,c] of odometerChecks)if(now-Date.parse(c.at)>CHECK_TTL_MS)odometerChecks.delete(key);
+      // Each pending check holds up to 3 MiB of photo bytes; cap memory at about 150 MiB.
+      if(odometerChecks.size>=50)odometerChecks.delete(odometerChecks.keys().next().value);
+      odometerChecks.set(checkId,{userId:user.id,stage:input.stage,typedKm,status,ocrKm:read.readingKm,model:read.model,sha256:photo.sha256,ext:photo.ext,bytes:photo.bytes,at:new Date().toISOString()});
+      return json(res,200,{checkId,status,ocrKm:read.readingKm,typedKm,unit:read.unit,reason:read.reason});
+    }
     if(url.pathname.startsWith('/api/trips')){
       if(user.role==='workshop')return json(res,403,{error:'Trip access requires a driver or manager role.'});
       const [, , ,id,action]=url.pathname.split('/');
@@ -172,10 +203,18 @@ export async function handleRequest(req,res){
       if(user.role!=='driver')return json(res,403,{error:'Only signed-in drivers can record their own trips.'});
       if(req.method!=='POST')return json(res,404,{error:'Not found'});
       if(id&&found&&found.driverId!==user.id)return json(res,403,{error:'This trip belongs to another driver.'});
-      const input=await body(req);let result;
+      const input=await body(req);let result,photoUse=null;
+      // Odometer photo evidence: optional (older clients), single use, must match the submitted odometer.
+      const evidenceFor=(stage,tripId,typedKm)=>{
+        if(!input.odometerCheckId)return {status:'not_provided'};
+        const check=takeCheck(input.odometerCheckId),name=`${tripId}-${stage}.${check?.ext}`;
+        const evidence=consumeCheck(check,{userId:user.id,stage,typedKm,note:input.odometerNote,photo:name});
+        photoUse={id:input.odometerCheckId,bytes:check.bytes,name};return evidence;
+      };
       await transaction(next=>{
         if(!id){
           const trip=createTrip(input,user,next,randomUUID());
+          trip.odometerEvidence={start:evidenceFor('start',trip.id,trip.startOdometer)};
           attachOrderToTrip(next,input,user,trip);
           rememberReportedMileage(next);const truck=next.trucks.find(t=>t.id===trip.truckId);truck.reportedOdometer=trip.startOdometer;truck.specifications=trip.specs;syncWorkshopMileage(next);
           trip.maintenanceCpkAtStart=analytics(next).trucks.find(t=>t.id===trip.truckId).cpk;
@@ -187,17 +226,46 @@ export async function handleRequest(req,res){
           if(action==='locations'){result={accepted:addLocations(trip,input.points)};}
           else if(action==='complete'){
             const truck=next.trucks.find(t=>t.id===trip.truckId);const complete=completeTrip(trip,input,truck);completeOrderForTrip(next,complete);
+            complete.odometerEvidence={...(trip.odometerEvidence||{}),end:evidenceFor('end',id,complete.endOdometer)};
             next.trips[next.trips.indexOf(trip)]=complete;rememberReportedMileage(next);truck.reportedOdometer=complete.endOdometer;syncWorkshopMileage(next);result={tripId:id};
           }else throw new Error('Unknown trip action.');
         }
         validate(next);if(action!=='locations'){next.revision++;next.ai.status=configured?'pending':'not_configured';}
       });
+      if(photoUse){
+        odometerChecks.delete(photoUse.id);
+        try{await mkdir(photosDir,{recursive:true});await writeFile(path.join(photosDir,photoUse.name),photoUse.bytes,{mode:0o600});}
+        catch(e){console.error(`Odometer photo ${photoUse.name} could not be saved: ${e.message}`);}
+      }
       if(action!=='locations')scheduleAI();return json(res,200,{ok:true,...result});
+    }
+    if(url.pathname==='/api/settings'){
+      if(req.method!=='PUT')return json(res,404,{error:'Not found'});
+      if(user.role!=='admin')return json(res,403,{error:'Only administrators can change settings.'});
+      const input=await body(req),f=input.roughRoadFactor;
+      // Uncalibrated assumption used in driver route cost estimates; null = not applied.
+      if(f!==null&&!(typeof f==='number'&&Number.isFinite(f)&&f>=1&&f<=3))return json(res,400,{error:'Rough-road factor must be between 1 and 3, or empty.'});
+      await transaction(next=>{next.settings={...(next.settings||{}),roughRoadFactor:f===null?null:Math.round(f*100)/100};});
+      return json(res,200,{settings:db.settings});
     }
     if(req.method==='POST'&&url.pathname==='/api/routes/preview'){
       if(!['driver','manager','admin'].includes(user.role))return json(res,403,{error:'Routing access required.'});
-      const input=await body(req);truckSpecifications(input.specs);locationPoint(input.origin,{fresh:true});
-      return json(res,503,{error:'Truck routing and elevation are placeholders. Choose a provider with Indonesian truck-restriction coverage and connect its adapter before route calculation.',routing:integrations().routing,routes:[]});
+      const input=await body(req),specs=truckSpecifications(input.specs),origin=locationPoint(input.origin,{fresh:true});
+      let stops,order=null,truckId=typeof input.truckId==='string'?input.truckId:null;
+      if(input.orderId){
+        order=db.orders.find(o=>o.id===input.orderId);
+        if(!order||(user.role==='driver'&&order.driverId!==user.id))return json(res,403,{error:'Select a delivery order assigned to you.'});
+        // Driver drives from the current GPS position to the pickup first, then the stops in reviewed order.
+        stops=routeStops([{address:order.pickupAddress},...order.stops.map(s=>({address:s.address}))],11);
+        truckId=order.truckId;
+      } else stops=routeStops(input.stops);
+      // Cost per route needs the truck's CPK (optional for older clients); drivers may only price their own trucks.
+      if(truckId&&(!db.trucks.some(t=>t.id===truckId)||(user.role==='driver'&&!user.assignedTruckIds.includes(truckId))))return json(res,403,{error:'Select a truck assigned to you.'});
+      const cpk=truckId?analytics(db).trucks.find(t=>t.id===truckId)?.cpk??null:null;
+      const fuel=order?{efficiencyKmPerLiter:order.costInputs?.fuelEfficiencyKmPerLiter??null,priceIdrPerLiter:order.costInputs?.fuelPriceIdrPerLiter??null}:null;
+      const lang=LANGS.includes(input.lang)?input.lang:'id';
+      const result=await previewRoutes({origin,specs,stops,lang},{orsKey:orsKey(),gemini:configured?{apiKey:process.env.GEMINI_API_KEY,model:process.env.GEMINI_ROUTE_MODEL||model}:null,cpk,fuel,roughRoadFactor:db.settings.roughRoadFactor});
+      return json(res,result.status,result.body);
     }
     if(!['POST','PUT','DELETE'].includes(req.method)) return json(res,404,{error:'Not found'});
     if(!canManageFleet(user))return json(res,403,{error:'Your role cannot change fleet or maintenance records.'});
@@ -246,7 +314,12 @@ export async function handleRequest(req,res){
 const server=http.createServer(handleRequest);
 if(!noListen) {
   server.on('error',error=>{console.error(`Unable to start local server: ${error.message}`);process.exit(1);});
-  server.listen(port,process.env.HOST||'127.0.0.1',()=>{console.log(`KiloMetric running at http://localhost:${server.address().port}`);if(configured)scheduleAI();});
+  server.listen(port,process.env.HOST||'127.0.0.1',()=>{
+    console.log(`KiloMetric running at http://localhost:${server.address().port}`);
+    // Phones on the same Wi-Fi use one of these as EXPO_PUBLIC_API_URL (only when bound to all interfaces).
+    if(process.env.HOST==='0.0.0.0')for(const a of Object.values(networkInterfaces()).flat())if(a.family==='IPv4'&&!a.internal)console.log(`  LAN: http://${a.address}:${server.address().port}`);
+    if(configured)scheduleAI();
+  });
 }
 async function shutdown(){clearTimeout(aiTimer);await vite?.close();server.close();}
 process.on('SIGTERM',()=>shutdown().then(()=>process.exit(0)));

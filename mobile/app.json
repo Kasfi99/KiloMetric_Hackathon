@@ -1,0 +1,59 @@
+{
+  "expo": {
+    "name": "KiloMetric Driver",
+    "slug": "kilometric-driver",
+    "scheme": "kilometric",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.kilometric.driver"
+    },
+    "android": {
+      "package": "com.kilometric.driver",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B5FFF",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "KiloMetric records your position during a trip to log the distance travelled.",
+          "locationWhenInUsePermission": "KiloMetric needs your location for the trip starting point and trip tracking.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "KiloMetric takes a photo of the odometer to verify the reading you enter.",
+          "photosPermission": "KiloMetric uses a saved odometer photo only when you choose one.",
+          "microphonePermission": false
+        }
+      ]
+    ]
+  }
+}

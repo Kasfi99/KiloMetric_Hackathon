@@ -1,0 +1,7 @@
+{
+  "defaultDestination": {"label": "Bandung (contoh)", "latitude": -6.9147, "longitude": 107.6098},
+  "variants": [
+    {"id": "fixture-tol", "label": "Via tol (contoh)", "distanceFactor": 1.25, "speedKmh": 48, "ascendM": 620, "descendM": 410},
+    {"id": "fixture-arteri", "label": "Via arteri (contoh)", "distanceFactor": 1.4, "speedKmh": 34, "ascendM": 540, "descendM": 390}
+  ]
+}

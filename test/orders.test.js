@@ -50,6 +50,13 @@ test('Google distance uses pickup and all stops in order, includes tolls, and re
  assert.equal(request.origin.address,fields.pickupAddress);assert.equal(request.destination.address,fields.stops[1].address);assert.deepEqual(request.intermediates,[{address:fields.stops[0].address}]);assert.equal(request.routeModifiers.avoidTolls,false);assert.equal(request.routingPreference,'TRAFFIC_AWARE');
  assert.equal(route.distanceKm,240);assert.equal(route.tollIdr,125000);assert.equal(route.truckRestrictionsVerified,false);assert.equal(route.returnToOriginIncluded,false);
  await assert.rejects(()=>googleOrderRoute(fields,{apiKey:'x',fetcher:async()=>reply({routes:[{distanceMeters:10}],geocodingResults:{origin:{partialMatch:true}}})}),/resolve an address precisely/);
+ // Partial match on venue names → retry with Google Places coordinates, accepted only when every place is precise.
+ const calls=[];
+ const viaPlaces=await googleOrderRoute(fields,{apiKey:'x',fetcher:async(url,options)=>{const b=JSON.parse(options.body);calls.push(url.includes('places')?'places':b.origin.address?'routes-address':'routes-latlng');
+  if(url.includes('places'))return reply({places:[{displayName:{text:b.textQuery},location:{latitude:-6.3,longitude:107.1},primaryType:'industrial_park',types:['industrial_park']}]});
+  return reply(b.origin.address?{routes:[{distanceMeters:10}],geocodingResults:{origin:{partialMatch:true}}}:{routes:[{distanceMeters:250000,duration:'15000s'}]});}});
+ assert.deepEqual(calls,['routes-address','places','places','places','routes-latlng']);assert.equal(viaPlaces.distanceKm,250);assert.equal(viaPlaces.geocoding.source,'google_places');
+ await assert.rejects(()=>googleOrderRoute(fields,{apiKey:'x',fetcher:async url=>url.includes('places')?reply({places:[{location:{latitude:-6.2,longitude:106.8},types:['locality']}]}):reply({routes:[{distanceMeters:10}],geocodingResults:{origin:{partialMatch:true}}})}),/resolve an address precisely/,'a coarse place never becomes a guessed distance');
  const noPrice=await googleOrderRoute(fields,{apiKey:'x',fetcher:async()=>reply({routes:[{distanceMeters:1000}]})});assert.equal(noPrice.tollIdr,null);
  await assert.rejects(()=>googleOrderRoute(fields,{apiKey:'x',fetcher:async()=>reply({routes:[]})}),/no positive/);
  await assert.rejects(()=>googleOrderRoute(fields,{}),/not configured/);

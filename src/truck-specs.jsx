@@ -3,7 +3,7 @@ import {AlertCircle,X} from 'lucide-react';
 import {api,SPEC_FIELDS} from './driver.jsx';
 
 const blank=Object.fromEntries(SPEC_FIELDS.map(([k])=>[k,'']));
-const fmt=v=>new Intl.NumberFormat('en-US',{maximumFractionDigits:2}).format(v);
+const fmt=v=>new Intl.NumberFormat('id-ID',{maximumFractionDigits:2}).format(v);
 export const openReports=truck=>(truck?.specReports||[]).filter(r=>!r.resolvedAt);
 export function specSummary(s){return s?`${fmt(s.heightM)} × ${fmt(s.widthM)} × ${fmt(s.lengthM)} m · ${s.axles} axles · ${fmt(s.maxGrossKg)} kg max`:null;}
 
@@ -24,7 +24,7 @@ export function TruckSpecsPanel({truck,role,reload,notify,onClose}){
    {editable&&open.length>0&&<small className="spec-note">Saving marks the {open.length} open driver report{open.length>1?'s':''} as resolved.</small>}
   </form>
   <div className="spec-reports"><h3>Driver mismatch reports <span className="count">{open.length} open</span></h3>
-   {reports.length?reports.map(r=><div className={'spec-report'+(r.resolvedAt?' resolved':'')} key={r.id}><p>“{r.note}”</p><small>{r.driverName} · {new Date(r.at).toLocaleString()}{r.resolvedAt?` · resolved ${new Date(r.resolvedAt).toLocaleDateString()}`:' · open'}</small></div>):<p className="spec-note">No reports from drivers.</p>}
+   {reports.length?reports.map(r=><div className={'spec-report'+(r.resolvedAt?' resolved':'')} key={r.id}><p>“{r.note}”</p><small>{r.driverName} · {new Date(r.at).toLocaleString('en-GB')}{r.resolvedAt?` · resolved ${new Date(r.resolvedAt).toLocaleDateString('en-GB')}`:' · open'}</small></div>):<p className="spec-note">No reports from drivers.</p>}
   </div>
  </section>;
 }

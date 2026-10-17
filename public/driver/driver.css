@@ -24,3 +24,11 @@
 .dest-row .field{flex:1}
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid #fff8;border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;vertical-align:-3px}
 @keyframes spin{to{transform:rotate(360deg)}}
+.restrictions{margin:12px 0}
+.restrictions .restriction{margin:4px 0}
+details.restriction summary{cursor:pointer;list-style:none}
+details.restriction summary::-webkit-details-marker{display:none}
+details.restriction summary::before{content:'ⓘ  '}
+details.restriction .why{color:var(--primary,#0b5fff);font-weight:700}
+details.restriction[open] .why{display:none}
+details.restriction p{margin:2px 0 0 18px}

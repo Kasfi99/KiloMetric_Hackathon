@@ -1,18 +1,52 @@
-import type { ReactNode } from 'react';
-import { Linking, Text, View } from 'react-native';
+import { useState, type ReactNode } from 'react';
+import { Linking, Pressable, Text, View } from 'react-native';
 import { Badge, Button, Card, Icon, P, s, Stat, StatusBadge } from './ui';
 import { day, num, rp, RESTRICTION } from '@/lib/format';
 import { C } from '@/lib/theme';
 import type { Order, OrderStop, Restrictions, RoadCondition, RouteCost } from '@/lib/types';
 
-export function RestrictionList({ r }: { r: Restrictions }) {
+const SPEC_KEYS = ['height', 'width', 'length', 'weight'], NO_SOURCE = ['bridge_limits', 'truck_bans', 'time_restrictions'];
+const names = (keys: string[]) => keys.map(k => (RESTRICTION[k] ?? k).toLowerCase()).join(', ');
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
+// Why each unchecked limit was not checked (contract: lib/routing.js, design.md §4). Shown on tap; never dropped.
+function restrictionReasons(r: Restrictions, sample: boolean) {
+  const u = r.unknown, out: string[] = [];
+  if (!r.checked.length) out.push(sample ? 'Sample routes are not calculated for any truck, so no limits were checked.' : 'Truck specifications are not set by your admin, so no truck limits were sent to the route provider.');
+  else {
+    const spec = u.filter(k => SPEC_KEYS.includes(k));
+    if (spec.length) out.push(`${cap(names(spec))}: not sent to the route provider.`);
+    if (u.includes('axleload')) out.push('Axle load: per-axle weight is not recorded, so it is not sent.');
+    if (u.includes('hazmat')) out.push('Hazardous goods: checked only when the cargo is declared hazardous.');
+  }
+  const none = u.filter(k => NO_SOURCE.includes(k));
+  if (none.length) out.push(`${cap(names(none))}: no data source covers Indonesian roads.`);
+  const other = u.filter(k => ![...SPEC_KEYS, 'axleload', 'hazmat', ...NO_SOURCE].includes(k));
+  if (other.length && r.checked.length) out.push(`${cap(names(other))}: not checked.`);
+  out.push('Follow dispatcher guidance and posted road signs.');
+  return out;
+}
+
+// Checked limits lead in one green line; every unchecked one stays listed in one muted line with the reasons behind "Why?".
+export function RestrictionList({ r, sample = false }: { r: Restrictions; sample?: boolean }) {
+  const [open, setOpen] = useState(false);
+  if (!r.checked.length && !r.unknown.length) return null;
+  const line = !r.checked.length ? `Not checked: all truck limits (${sample ? 'sample route' : 'truck specifications not set'})` : `Not checked: ${names(r.unknown)}`;
   return (
     <View style={{ marginVertical: 8, gap: 4 }}>
-      <Text style={[s.small, { color: C.success }]}>Checked: {r.checked.length ? r.checked.map(k => RESTRICTION[k] ?? k).join(' · ') : 'none'}</Text>
-      <Text style={s.small}>Unknown: {r.unknown.map(k => RESTRICTION[k] ?? k).join(' · ') || '—'}</Text>
+      {r.checked.length > 0 && <View style={[s.row, { alignItems: 'flex-start', gap: 6 }]}><Icon name="check-circle" size={16} color={C.success} /><Text style={[s.small, { color: C.success, flexShrink: 1 }]}>Checked for your truck: {names(r.checked)}</Text></View>}
+      {r.unknown.length > 0 && <>
+        <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityHint="Shows why these limits were not checked" onPress={() => setOpen(o => !o)} hitSlop={8} style={[s.row, { alignItems: 'flex-start', gap: 6 }]}>
+          <Icon name="info-outline" size={16} color={C.muted} />
+          <Text style={[s.small, { flexShrink: 1 }]}>{line} <Text style={[s.small, s.link]}>{open ? 'Hide' : 'Why?'}</Text></Text>
+        </Pressable>
+        {open && <View style={{ paddingLeft: 22, gap: 2 }}>{(!r.checked.length ? [`Not checked: ${names(r.unknown)}.`, ...restrictionReasons(r, sample)] : restrictionReasons(r, sample)).map(t => <Text key={t} style={s.small}>{t}</Text>)}</View>}
+      </>}
     </View>
   );
 }
+
+export const sameRestrictions = (a: Restrictions, b: Restrictions) => a.checked.join() === b.checked.join() && a.unknown.join() === b.unknown.join();
 
 // Route estimate: total and trip CPK lead; components below; unknown stays "—" with the reason.
 export function RouteCostBlock({ cost, distanceKm }: { cost: RouteCost; distanceKm: number }) {

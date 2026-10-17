@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
-import { RestrictionList, RoadChips, RouteCostBlock } from '@/components/domain';
+import { RestrictionList, RoadChips, RouteCostBlock, sameRestrictions } from '@/components/domain';
 import { RouteMap, type MapSpec } from '@/components/RouteMap';
 import { StartSheet } from '@/components/StartSheet';
 import { Back, Badge, Banner, Button, Card, Divider, Empty, Foot, H1, H2, Icon, Loading, P, Screen, Stepbar, s } from '@/components/ui';
@@ -11,6 +11,7 @@ import { draftStops, gpsFresh, isIdentity, specs } from '@/lib/draft';
 import { duration, num } from '@/lib/format';
 import { C } from '@/lib/theme';
 import { getFreshPoint } from '@/lib/tracking';
+import { useLastFix } from '@/lib/useLastFix';
 import type { Preview, PreviewStop, StopOrder } from '@/lib/types';
 
 const TIMEOUT_MS = 45000, SLOW_MS = 8000;
@@ -77,11 +78,14 @@ export default function Routes() {
   const started = useRef(false);
   useEffect(() => { if (!started.current && !p && d) { started.current = true; fetchRoutes(null); } }, [p, d, fetchRoutes]);
 
+  // The driver's dot: newest of the stored fix (written by getFreshPoint) and the origin fix held in app state.
+  const stored = useLastFix(), me = stored && (!gps || stored.timestamp >= gps.timestamp) ? stored : gps;
   const spec = useMemo<MapSpec | null>(() => p && ({
     routes: p.routes.map((r, i) => ({ coords: r.polyline, selected: i === index })), trail: [],
-    points: [{ at: [p.origin.latitude, p.origin.longitude], kind: 'origin' }, ...p.stops.filter(st => st.latitude != null).map(st => ({ at: [st.latitude!, st.longitude!] as [number, number], kind: 'stop' as const }))],
+    points: [{ at: [p.origin.latitude, p.origin.longitude], kind: 'origin' }, ...p.stops.filter(st => st.latitude != null).map(st => ({ at: [st.latitude!, st.longitude!] as [number, number], kind: 'stop' as const })),
+      ...(me ? [{ at: [me.latitude, me.longitude] as [number, number], kind: 'here' as const }] : [])],
     fitKey: p.routing.computedAt,
-  }), [p, index]);
+  }), [p, index, me]);
 
   const head = <><Back onPress={back} /><H1 sub="Fastest route priority · Tolls allowed">Choose a route</H1><Stepbar step={2} /></>;
   if (!d) return <Screen>{head}<Empty title="Nothing to route" sub="Prepare a trip first." /></Screen>;
@@ -101,6 +105,9 @@ export default function Routes() {
   const routes = p.routes, single = routes.length === 1, x = p.explanation, chosen = routes[index] ?? routes[0];
   // Warnings repeated on every route are shown once as banners; route-specific ones stay on their card.
   const shared = routes[0]?.warnings.filter(w => routes.every(r => r.warnings.includes(w))) ?? [];
+  // Same for truck limits: identical on every route (the usual case) → one block below the cards, not one per card.
+  const sample = p.routing.provider === 'fixture', sameLimits = !single && routes.every(r => sameRestrictions(r.restrictions, routes[0].restrictions));
+  const aiSummary = x.summary?.trim(), caveats = x.status === 'ok' ? x.caveats.filter(c => c.trim()) : [];
   const so = p.stopOrder, sug = so?.suggestion && kept !== so.suggestion.order.join() ? so.suggestion : null, reordered = !!so && !isIdentity(so.applied);
   const names = d.orderId ? (app.order(d.orderId)?.stops ?? []).map(st => st.recipient || st.address) : draftStops(d).map(st => st.address);
   return (
@@ -113,7 +120,9 @@ export default function Routes() {
       {sug && <StopSuggestion sug={sug} applied={so!.applied} names={names} hasPickup={!!d.orderId} onUse={() => load(sug.order)} onKeep={() => setKept(sug.order.join())} />}
       {p.routing.provider === 'ors' && <Found stops={p.stops} hasPickup={!!d.orderId} />}
       {routes.map((r, i) => {
-        const own = r.warnings.filter(w => !shared.includes(w)), ai = x.status === 'ok' ? x.perRoute.find(q => q.routeId === r.id) : undefined, on = i === index;
+        const own = r.warnings.filter(w => !shared.includes(w)), on = i === index, q = x.status === 'ok' ? x.perRoute.find(e => e.routeId === r.id) : undefined;
+        // Hide empty AI parts instead of drawing blank rows.
+        const ai = q && { headline: q.headline?.trim(), pros: q.pros.filter(t => t.trim()), cons: q.cons.filter(t => t.trim()) }, hasAi = !!ai && (!!ai.headline || ai.pros.length + ai.cons.length > 0);
         return (
           <Card key={r.id} selected={on && !single} onPress={single ? undefined : () => setIndex(i)}>
             <View style={[s.row, { justifyContent: 'space-between' }]}>
@@ -124,19 +133,19 @@ export default function Routes() {
             {r.trafficDurationMin != null && <P small>With current traffic ≈ {duration(r.trafficDurationMin)} (Google Maps)</P>}
             <RouteCostBlock cost={r.cost} distanceKm={r.distanceKm} />
             <RoadChips road={r.roadCondition} distanceKm={r.distanceKm} />
-            <P small style={{ marginTop: 8 }}>Ascent ↑ {num(r.ascendM, 0)} m · Descent ↓ {num(r.descendM, 0)} m{r.ascendM == null ? ' · unknown' : ''}</P>
-            <RestrictionList r={r.restrictions} />
+            <P small style={{ marginTop: 8 }}>{r.ascendM == null && r.descendM == null ? 'Ascent and descent: unknown' : `Ascent ↑ ${num(r.ascendM, 0)} m · Descent ↓ ${num(r.descendM, 0)} m`}</P>
+            {!sameLimits && <RestrictionList r={r.restrictions} sample={sample} />}
             {own.map(w => <Foot key={w}>⚠ {w}</Foot>)}
-            {ai && <><Divider /><P small>AI explanation</P><Text style={{ fontStyle: 'italic', marginBottom: 4 }}>{ai.headline}</Text>{ai.pros.map(t => <P key={t} small style={{ color: C.success }}>✓ {t}</P>)}{ai.cons.map(t => <P key={t} small style={{ color: C.danger }}>✕ {t}</P>)}</>}
+            {hasAi && <><Divider /><P small>AI explanation</P>{!!ai.headline && <Text style={{ fontStyle: 'italic', marginBottom: 4 }}>{ai.headline}</Text>}{ai.pros.map(t => <P key={t} small style={{ color: C.success }}>✓ {t}</P>)}{ai.cons.map(t => <P key={t} small style={{ color: C.danger }}>✕ {t}</P>)}</>}
           </Card>
         );
       })}
-      <Card style={{ backgroundColor: C.aiBg }}>
+      {sameLimits && <Card><H2>Truck limits on {routes.length === 2 ? 'both routes' : `all ${routes.length} routes`}</H2><RestrictionList r={routes[0].restrictions} sample={sample} /></Card>}
+      {(!!aiSummary || caveats.length > 0) && <Card style={{ backgroundColor: C.aiBg }}>
         <H2>AI explanation</H2>
-        <P small style={{ marginTop: 8 }}>{x.summary}</P>
-        {x.status === 'ok' ? x.caveats.map(c => <Foot key={c}>⚠ {c}</Foot>) : <Foot>Route figures above still come from the routing provider.</Foot>}
-        <Foot>Bridge limits, truck bans and time restrictions are not checked. Follow dispatcher guidance and posted road signs.</Foot>
-      </Card>
+        {!!aiSummary && <P small style={{ marginTop: 8 }}>{aiSummary}</P>}
+        {x.status === 'ok' ? caveats.map(c => <Foot key={c}>⚠ {c}</Foot>) : <Foot>Route figures above still come from the routing provider.</Foot>}
+      </Card>}
       <StartSheet visible={sheet === 'route'} onClose={() => setSheet(null)} route={chosen} />
     </Screen>
   );

@@ -13,12 +13,14 @@ const HTML = `<!doctype html><html><head><meta name="viewport" content="width=de
 (function(){
  var post=function(m){window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify(m))};
  if(!window.maplibregl){post({type:'error',message:'Map library could not load (offline?).'});return}
- var map=new maplibregl.Map({container:'m',style:{version:8,sources:{osm:{type:'raster',tiles:['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],tileSize:256,maxzoom:19,attribution:'© OpenStreetMap contributors'}},layers:[{id:'osm',type:'raster',source:'osm'}]},center:[106.8456,-6.2088],zoom:10,attributionControl:{compact:true}});
+ var map=new maplibregl.Map({container:'m',style:{version:8,sources:{osm:{type:'raster',tiles:['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],tileSize:256,maxzoom:19,attribution:'© OpenStreetMap contributors'}},layers:[{id:'osm',type:'raster',source:'osm'}]},center:[106.8456,-6.2088],zoom:10,attributionControl:false});
+ // Attribution bottom-left: bottom-right holds the my-location button.
+ map.addControl(new maplibregl.AttributionControl({compact:true}),'bottom-left');
  map.touchPitch.disable();map.dragRotate.disable();map.touchZoomRotate.disableRotation();
  var ready=false,pending=null,fitKey=null,last=null,ll=function(p){return [p[1],p[0]]};
  var line=function(c,props){return {type:'Feature',properties:props,geometry:{type:'LineString',coordinates:c.map(ll)}}};
  var src=function(id,data){var s=map.getSource(id);s?s.setData(data):map.addSource(id,{type:'geojson',data:data})};
- function fit(animate){if(!last)return;var all=[].concat.apply([],last.routes.map(function(r){return r.coords||[]})).concat(last.trail,last.points.map(function(p){return p.at}));
+ function fit(animate){if(!last)return;var all=[].concat.apply([],last.routes.map(function(r){return r.coords||[]})).concat(last.trail,last.points.filter(function(p){return p.kind!=='here'}).map(function(p){return p.at}));
   if(all.length){var b=new maplibregl.LngLatBounds(ll(all[0]),ll(all[0]));all.forEach(function(c){b.extend(ll(c))});map.fitBounds(b,{padding:{top:56,right:64,bottom:24,left:24},maxZoom:15,duration:animate?400:0})}}
  function draw(spec){
   last=spec;

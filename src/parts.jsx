@@ -1,8 +1,8 @@
-import React,{useState,useEffect} from 'react';
+import React,{useState,useEffect,useRef} from 'react';
 import {Package,Search,Pencil,Trash2,ArrowUpRight,AlertCircle} from 'lucide-react';
 import {summarizePartCycles} from '../lib/analytics.js';
 import {money,number,cpk,ratio,date} from './format.js';
-import {plural,paginate,nextSort,SortHeader,FilterSelect,FilterChips,Pager,SidePanel,focusRow} from './table-kit.jsx';
+import {plural,paginate,nextSort,SortHeader,FilterSelect,FilterChips,Pager,DetailModal,focusRow,listPosition,tabKeys} from './table-kit.jsx';
 
 const LIMITED=5;
 const EVIDENCE={completed:'Has completed lifecycles',none:'No completed lifecycle yet'};
@@ -50,23 +50,25 @@ export function PartsPage({data,onEdit,onDelete,onCompare}){
  const clear=()=>{setSearch('');setBrand('');setModel('');setEvidence('');setPage(1);};
  const selected=rows.find(r=>r.p.id===selectedId);
  useEffect(()=>{if(selectedId&&!selected)setSelectedId(null);},[selectedId,!selected]);
- function closePanel(){const id=selectedId;setSelectedId(null);focusRow(id);}
+ const ids=sorted.map(r=>r.p.id);
+ // Closing returns focus to the row, turning the table to the page that holds it when ‹ › moved past the visible page.
+ // A brand switch inside the modal can show a part outside the current list; focus then returns to the row it was opened from.
+ const opened=useRef(null),openRow=id=>{opened.current=id;setSelectedId(id);};
+ function closePanel(){const id=ids.includes(selectedId)?selectedId:opened.current,i=ids.indexOf(id);if(i>=0)setPage(Math.floor(i/size)+1);setSelectedId(null);focusRow(id);}
  const th=key=><SortHeader label={SORT_LABEL[key]} active={sort.key===key} dir={sort.dir} onSort={()=>sortBy(key)}/>;
  const select=(label,val,set,options)=><FilterSelect label={label} value={val} onChange={reset(set)} options={options}/>;
  const tabs=[['','All',data.parts.length],...categories.map(c=>[c,c,data.parts.filter(p=>p.category===c).length])];
  const tabId=i=>`parts-tab-${i}`,activeIndex=tabs.findIndex(([v])=>v===activeTab);
- function tabKey(e){const step={ArrowRight:1,ArrowLeft:-1}[e.key],list=[...e.currentTarget.querySelectorAll('[role="tab"]')];let i=list.indexOf(document.activeElement);if(i<0)return;
-  if(step)i=(i+step+list.length)%list.length;else if(e.key==='Home')i=0;else if(e.key==='End')i=list.length-1;else return;e.preventDefault();list[i].focus();list[i].click();}
  const scope=activeTab?` in ${activeTab}`:'';
  return <>
  <section className="card parts-register">
   <div className="card-heading"><div className="title-count"><h2>Spare parts & CPK</h2><span className="count" aria-live="polite">{filtered.length===inTab.length?plural(inTab.length,'part'):`${filtered.length} of ${plural(inTab.length,'part')}`}{scope}</span></div><label className="search"><Search size={16}/><input aria-label="Search name, brand or SKU" placeholder="Search name, brand or SKU…" value={search} onChange={e=>reset(setSearch)(e.target.value)}/></label></div>
-  {data.parts.length>0&&<div className="category-tabs" role="tablist" aria-label="Part categories" onKeyDown={tabKey}>{tabs.map(([v,label,n],i)=><button type="button" role="tab" key={v||'all'} id={tabId(i)} aria-selected={v===activeTab} aria-controls="parts-table" tabIndex={v===activeTab?0:-1} className={'category-tab'+(v===activeTab?' active':'')} onClick={()=>{reset(setTab)(v);}}>{label}<span className="tab-count">{n}</span></button>)}</div>}
+  {data.parts.length>0&&<div className="category-tabs" role="tablist" aria-label="Part categories" onKeyDown={tabKeys}>{tabs.map(([v,label,n],i)=><button type="button" role="tab" key={v||'all'} id={tabId(i)} aria-selected={v===activeTab} aria-controls="parts-table" tabIndex={v===activeTab?0:-1} className={'category-tab'+(v===activeTab?' active':'')} onClick={()=>{reset(setTab)(v);}}>{label}<span className="tab-count">{n}</span></button>)}</div>}
   <div className="list-filters">{select('Brand',brand,setBrand,brands.map(b=>[b,b]))}{select('Truck model',model,setModel,models.map(m=>[m,m]))}{select('Evidence',evidence,setEvidence,Object.entries(EVIDENCE))}</div>
   <FilterChips chips={chips} onClear={clear}/>
   <div className="table-scroll" id="parts-table" role={data.parts.length?'tabpanel':undefined} aria-labelledby={data.parts.length?tabId(activeIndex):undefined}><table className="list-table"><thead><tr><th>Part</th>{th('cpk')}{th('ratio')}{th('life')}{th('price')}{th('evidence')}<th>Fits</th></tr></thead>
-  <tbody>{visible.map(({p,stats,lowest,ratio:r,best,measured})=><tr key={p.id} className="list-row" onClick={()=>setSelectedId(p.id)}>
-   <td><button type="button" className="row-open" data-row-id={p.id} aria-haspopup="dialog" aria-label={`Open details for ${p.brand} ${p.name}`} onClick={e=>{e.stopPropagation();setSelectedId(p.id);}}><span className="entity-icon"><Package size={18}/></span><span><strong>{p.name}</strong><small>{p.brand} · {p.sku}</small></span></button></td>
+  <tbody>{visible.map(({p,stats,lowest,ratio:r,best,measured})=><tr key={p.id} className="list-row" onClick={()=>openRow(p.id)}>
+   <td><button type="button" className="row-open" data-row-id={p.id} aria-haspopup="dialog" aria-label={`Open details for ${p.brand} ${p.name}`} onClick={e=>{e.stopPropagation();openRow(p.id);}}><span className="entity-icon"><Package size={18}/></span><span><strong>{p.name}</strong><small>{p.brand} · {p.sku}</small></span></button></td>
    <td>{stats.cpk===null?<><strong>—</strong><small>No completed lifecycle yet</small></>:<strong className="num">{cpk(stats.cpk)}</strong>}</td>
    <td>{lowest?<span className="lowest">Lowest in {p.category}</span>:r!==null?<span className="ratio">{ratio(r)} best</span>:'—'}{lowest&&<small>{measured>1?`${measured} parts measured`:'Only part measured'}</small>}{!lowest&&r!==null&&<small>Best {cpk(best)} IDR/unit/km</small>}</td>
    <td>{stats.avgLife===null?'—':`${number(stats.avgLife)} km`}</td>
@@ -79,14 +81,16 @@ export function PartsPage({data,onEdit,onDelete,onCompare}){
   </div>
   <Pager total={sorted.length} start={start} shown={visible.length} size={size} onSize={n=>{setSize(n);setPage(1);}} current={current} pages={pages} onPage={setPage} label="Spare parts pages"/>
   <div className="section-foot">Sorted by {sort.key==='cpk'?'observed CPK within each category':SORT_LABEL[sort.key]}, {sort.dir==='desc'?'highest':'lowest'} first; unknown values last. vs best = part CPK ÷ the lowest observed CPK in the same category{model?` on ${model} trucks`:''}. Fewer than {LIMITED} completed lifecycles is limited evidence.</div>
-  {selected&&<PartPanel key={selected.p.id} row={selected} rows={rows} model={model} data={data} onClose={closePanel} onSelect={setSelectedId} onEdit={()=>onEdit(selected.p)} onDelete={()=>onDelete(selected.p)} onCompare={onCompare}/>}
+  {selected&&<PartPanel row={selected} rows={rows} model={model} position={listPosition(ids,selected.p.id,setSelectedId)} data={data} onClose={closePanel} onSelect={setSelectedId} onEdit={()=>onEdit(selected.p)} onDelete={()=>onDelete(selected.p)} onCompare={onCompare}/>}
  </section>
  <div className="method-note"><AlertCircle size={16}/><span>Observed CPK = actual purchase cost + installation labor of completed replacements ÷ completed unit-kilometers; catalog prices do not determine it. Average life is weighted by unit count. Figures mix positions and operating profiles; use Mix optimizer to compare under matching conditions.</span></div>
  </>;
 }
 
-function PartPanel({row,rows,model,data,onClose,onSelect,onEdit,onDelete,onCompare}){
- const {p,stats,lowest,ratio:r,best}=row,[status,setStatus]=useState('all');
+function PartPanel({row,rows,model,position,data,onClose,onSelect,onEdit,onDelete,onCompare}){
+ const {p,stats,lowest,ratio:r,best,measured}=row;
+ // The status filter starts at All for each part (the modal itself stays open across ‹ › and brand switches).
+ const [filter,setFilter]=useState({id:p.id,status:'all'}),status=filter.id===p.id?filter.status:'all',setStatus=s=>setFilter({id:p.id,status:s});
  const peers=rows.filter(x=>x.p.category===p.category).sort((x,y)=>(x.stats.cpk===null)-(y.stats.cpk===null)||(x.stats.cpk??0)-(y.stats.cpk??0)||byName(x,y));
  const history=stats.cycles.slice().sort((a,b)=>b.startDate.localeCompare(a.startDate));
  const counts={all:history.length,completed:history.filter(c=>c.status==='completed').length,active:history.filter(c=>c.status==='active').length};
@@ -94,17 +98,18 @@ function PartPanel({row,rows,model,data,onClose,onSelect,onEdit,onDelete,onCompa
  const plate=id=>data.trucks.find(t=>t.id===id)?.plate||'Truck not registered';
  const on=model?` on ${model} trucks`:'';
  const actions=<><button type="button" className="secondary panel-delete" onClick={onDelete}><Trash2 size={15}/>Delete</button><button type="button" className="secondary" onClick={onEdit}><Pencil size={15}/>Edit part</button>{onCompare&&<button type="button" className="primary panel-compare" onClick={onCompare}>Compare by model & profile in Mix optimizer<ArrowUpRight size={15}/></button>}</>;
- return <SidePanel id="part-panel-title" eyebrow="SPARE PART" title={`${p.brand} · ${p.name}`} subtitle={`${p.category} · SKU ${p.sku}`} closeLabel="Close part details" onClose={onClose} actions={actions} wide>
-  <p className="panel-note">Figures for {model?`${model} trucks`:'all truck models'}. Change the Truck model filter to recompute.</p>
-  <dl className="panel-summary">
-   <div><dt>Observed CPK</dt><dd>{stats.cpk===null?'unknown':<>{cpk(stats.cpk)} <span>IDR/unit/km</span></>}</dd><small>{stats.cpk===null?'No completed lifecycle yet':lowest?`Lowest in ${p.category}`:r!==null?`${ratio(r)} the best in ${p.category} (${cpk(best)})`:'No comparison available'}</small></div>
+ const summary=<><dl className="panel-summary">
+   <div><dt>Observed CPK</dt><dd>{stats.cpk===null?'unknown':<>{cpk(stats.cpk)} <span>IDR/unit/km</span></>}</dd>{stats.cpk===null&&<small>No completed lifecycle yet</small>}</div>
+   <div><dt>vs best</dt><dd>{lowest?'Lowest':r!==null?ratio(r):'—'}</dd><small>{stats.cpk===null?'No completed lifecycle yet':lowest?`Lowest in ${p.category} · ${measured>1?`${measured} parts measured`:'only part measured'}`:r!==null?`${ratio(r)} the best in ${p.category} (${cpk(best)})`:'No comparison available'}</small></div>
    <div><dt>Average life</dt><dd>{stats.avgLife===null?'—':<>{number(stats.avgLife)} <span>km</span></>}</dd><small>{stats.units?`${plural(stats.units,'unit')} with a completed life`:'No completed lifecycle yet'}</small></div>
    <div><dt>Evidence</dt><dd>{stats.completed} <span>completed</span></dd><small>{stats.active} in service{limited(stats)?' · limited evidence':''}</small></div>
-   <div><dt>Catalog price</dt><dd>{Number.isFinite(p.price)?money(p.price):'—'}</dd><small>Saved visits keep the price actually paid</small></div>
-  </dl>
+  </dl><p className="panel-note">Figures for {model?`${model} trucks`:'all truck models'}. Change the Truck model filter to recompute.</p></>;
+ const tabs=[
+  {id:'overview',label:'Overview',content:<>
+  <section className="panel-section"><h3>Catalog price</h3><p className="panel-text">{Number.isFinite(p.price)?money(p.price):'—'}</p><p className="panel-note">Saved visits keep the price actually paid.</p></section>
   <section className="panel-section"><h3>Compatible models</h3>{p.models.length?<p className="panel-text">{p.models.join(', ')}</p>:<p className="panel-note">No compatible models listed. Edit the part to add them.</p>}</section>
-  <section className="panel-section"><h3>Other brands in {p.category}</h3>{peers.length>1?<><p className="panel-note">Lowest observed CPK first{on}.</p><ul className="peer-list">{peers.map(x=><li key={x.p.id}><div>{x.p.id===p.id?<strong>{x.p.brand} · {x.p.name}</strong>:<button type="button" className="text-button" onClick={()=>onSelect(x.p.id)}>{x.p.brand} · {x.p.name}</button>}<small>{x.p.id===p.id?'This part':x.p.sku}</small></div><div><strong>{x.stats.cpk===null?'—':`${cpk(x.stats.cpk)} IDR/unit/km`}</strong><small>{x.stats.avgLife===null?'No completed lifecycle yet':`${number(x.stats.avgLife)} km avg life`} · {evidenceText(x.stats)}{limited(x.stats)?' · limited evidence':''}</small></div></li>)}</ul></>:<p className="panel-note">No other part in {p.category} in the catalog. Add one to compare brands.</p>}</section>
-  <section className="panel-section"><h3>Installation & replacement history</h3>
+  <section className="panel-section"><h3>Other brands in {p.category}</h3>{peers.length>1?<><p className="panel-note">Lowest observed CPK first{on}.</p><ul className="peer-list">{peers.map(x=><li key={x.p.id}><div>{x.p.id===p.id?<strong>{x.p.brand} · {x.p.name}</strong>:<button type="button" className="text-button" onClick={()=>onSelect(x.p.id)}>{x.p.brand} · {x.p.name}</button>}<small>{x.p.id===p.id?'This part':x.p.sku}</small></div><div><strong>{x.stats.cpk===null?'—':`${cpk(x.stats.cpk)} IDR/unit/km`}</strong><small>{x.stats.avgLife===null?'No completed lifecycle yet':`${number(x.stats.avgLife)} km avg life`} · {evidenceText(x.stats)}{limited(x.stats)?' · limited evidence':''}</small></div></li>)}</ul></>:<p className="panel-note">No other part in {p.category} in the catalog. Add one to compare brands.</p>}</section></>},
+  {id:'history',label:'Lifecycle history',count:history.length,content:<section className="panel-section"><h3>Installation & replacement history</h3>
    {history.length>0&&<div className="segmented" role="group" aria-label="Filter history by status">{Object.entries(HISTORY).map(([k,label])=><button type="button" key={k} aria-pressed={status===k} className={'segment'+(status===k?' active':'')} onClick={()=>setStatus(k)}>{label}<span>{counts[k]}</span></button>)}</div>}
    {shown.length>0&&<div className="table-scroll"><table className="panel-table"><thead><tr><th>Truck / position</th><th>Installed</th><th>Replaced</th><th>Life / distance</th><th>Installed cost</th><th>Part CPK</th><th>Status</th></tr></thead><tbody>{shown.map((c,i)=><tr key={c.installationId||i}>
     <td><strong>{plate(c.truckId)}</strong><small>{c.model} · {c.duty}</small><small>{c.position}{c.quantity>1?` · ${c.quantity} units tracked together`:''}</small></td>
@@ -118,6 +123,7 @@ function PartPanel({row,rows,model,data,onClose,onSelect,onEdit,onDelete,onCompa
    {!history.length&&<p className="panel-note">No installations of this part recorded{on}. Log one during a workshop visit to start tracking.</p>}
    {history.length>0&&!shown.length&&<p className="panel-note">No {status==='active'?'installations still in service':'replaced installations'}{on}.</p>}
    <p className="panel-note history-note">A replacement at the same category and position closes the old part’s life, even when the new brand differs. Grouped records allocate installation labor evenly across units and assume a shared lifespan.</p>
-  </section>
- </SidePanel>;
+  </section>},
+ ];
+ return <DetailModal id="part-panel-title" itemId={p.id} eyebrow="SPARE PART" title={`${p.brand} · ${p.name}`} subtitle={`${p.category} · SKU ${p.sku}`} summary={summary} position={position} noun="part" closeLabel="Close part details" onClose={onClose} tabs={tabs} actions={actions}/>;
 }

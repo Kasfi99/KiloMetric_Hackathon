@@ -1,4 +1,4 @@
-import React,{useState} from 'react';
+import React,{useState,useEffect,useRef} from 'react';
 import {Search,Pencil,Trash2,Wrench} from 'lucide-react';
 import {paginate,nextSort,SortHeader,FilterSelect,FilterChips,Pager,plural} from './table-kit.jsx';
 import {money,number,date} from './format.js';
@@ -11,8 +11,11 @@ const SORT_LABEL={date:'Service date',odometer:'Odometer',cost:'Total cost'};
 function DateFilter({label,value,onChange,min,max}){return <label className="list-filter"><span>{label}</span><input type="date" value={value} min={min} max={max} onChange={e=>onChange(e.target.value)}/></label>;}
 
 // Workshop visit history: search, truck / workshop / date filters, sortable columns and pagination.
-export function MaintenanceHistory({data,onEdit,onDelete,onLog}){
- const [query,setQuery]=useState(''),[truck,setTruck]=useState(''),[workshop,setWorkshop]=useState(''),[from,setFrom]=useState(''),[to,setTo]=useState('');
+// initialTruck presets the truck filter (Fleet detail "See all visits"); the history then takes focus so keyboard users land on it.
+export function MaintenanceHistory({data,onEdit,onDelete,onLog,initialTruck=''}){
+ const heading=useRef(null);
+ useEffect(()=>{if(initialTruck){heading.current?.scrollIntoView({block:'start'});heading.current?.focus({preventScroll:true});}},[]);
+ const [query,setQuery]=useState(''),[truck,setTruck]=useState(initialTruck),[workshop,setWorkshop]=useState(''),[from,setFrom]=useState(''),[to,setTo]=useState('');
  const [sort,setSort]=useState({key:'date',dir:'desc'}),[page,setPage]=useState(1),[size,setSize]=useState(10);
  const reset=fn=>v=>{fn(v);setPage(1);};
  const plateOf=id=>data.trucks.find(t=>t.id===id);
@@ -29,7 +32,7 @@ export function MaintenanceHistory({data,onEdit,onDelete,onLog}){
  const clear=()=>{setQuery('');setTruck('');setWorkshop('');setFrom('');setTo('');setPage(1);};
  const sortBy=key=>{setSort(s=>nextSort(s,key));setPage(1);};
  return <section className="card">
-  <div className="card-heading"><div className="title-count"><h2>Maintenance history</h2><span className="count">{chips.length?`${filtered.length} of ${rows.length} visits`:plural(rows.length,'visit')}</span></div><label className="search"><Search size={16}/><input aria-label="Search truck, workshop or notes" placeholder="Search truck, workshop or notes…" value={query} onChange={e=>reset(setQuery)(e.target.value)}/></label></div>
+  <div className="card-heading"><div className="title-count"><h2 ref={heading} tabIndex={-1}>Maintenance history</h2><span className="count">{chips.length?`${filtered.length} of ${rows.length} visits`:plural(rows.length,'visit')}</span></div><label className="search"><Search size={16}/><input aria-label="Search truck, workshop or notes" placeholder="Search truck, workshop or notes…" value={query} onChange={e=>reset(setQuery)(e.target.value)}/></label></div>
   {rows.length>0&&<div className="list-filters">
    <FilterSelect label="Truck" value={truck} onChange={reset(setTruck)} options={trucks}/>
    <FilterSelect label="Workshop" value={workshop} onChange={reset(setWorkshop)} options={workshops}/>

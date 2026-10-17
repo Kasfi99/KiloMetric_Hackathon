@@ -1,9 +1,9 @@
 import React,{useState,useEffect} from 'react';
-import {Truck,Search,Pencil,Trash2,Wrench,Ruler} from 'lucide-react';
+import {Truck,Search,Pencil,Trash2,Wrench,Ruler,ArrowRight} from 'lucide-react';
 import {eventCost} from '../lib/analytics.js';
 import {openReports} from './truck-specs.jsx';
 import {money,number,cpk,ratio,date} from './format.js';
-import {plural,paginate,nextSort,SortHeader,FilterSelect,FilterChips,Pager,SidePanel,focusRow} from './table-kit.jsx';
+import {plural,paginate,nextSort,SortHeader,FilterSelect,FilterChips,Pager,DetailModal,focusRow,listPosition} from './table-kit.jsx';
 
 const HIGH=1.2;
 const share=v=>v>0&&v<0.01?'<1%':new Intl.NumberFormat('id-ID',{style:'percent',maximumFractionDigits:0}).format(v);
@@ -29,7 +29,7 @@ function costBreakdown(records,parts){
  return {total,categories:[...categories].sort((a,b)=>b[1]-a[1])};
 }
 
-export function FleetPage({data,onEdit,onDelete,onLog,onSpecs}){
+export function FleetPage({data,onEdit,onDelete,onLog,onSpecs,onVisits}){
  const a=data.analytics;
  const [search,setSearch]=useState(''),[model,setModel]=useState(''),[duty,setDuty]=useState(''),[cost,setCost]=useState(''),[specs,setSpecs]=useState('');
  const [sort,setSort]=useState({key:'cpk',dir:'desc'}),[page,setPage]=useState(1),[size,setSize]=useState(10),[selectedId,setSelectedId]=useState(null);
@@ -49,11 +49,13 @@ export function FleetPage({data,onEdit,onDelete,onLog,onSpecs}){
  const clear=()=>{setSearch('');setModel('');setDuty('');setCost('');setSpecs('');setPage(1);};
  const selected=rows.find(r=>r.t.id===selectedId);
  useEffect(()=>{if(selectedId&&!selected)setSelectedId(null);},[selectedId,!selected]);
- function closePanel(){const id=selectedId;setSelectedId(null);focusRow(id);}
+ const ids=sorted.map(r=>r.t.id);
+ // Closing returns focus to the row, turning the table to the page that holds it when ‹ › moved past the visible page.
+ function closePanel(){const id=selectedId,i=ids.indexOf(id);if(i>=0)setPage(Math.floor(i/size)+1);setSelectedId(null);focusRow(id);}
  const th=key=><SortHeader label={SORT_LABEL[key]} active={sort.key===key} dir={sort.dir} onSort={()=>sortBy(key)}/>;
  const select=(label,val,set,options)=><FilterSelect label={label} value={val} onChange={reset(set)} options={options}/>;
  return <section className="card fleet-register">
-  <div className="card-heading"><div className="title-count"><h2>Fleet register</h2><span className="count" aria-live="polite">{filtered.length===rows.length?plural(rows.length,'truck'):`${filtered.length} of ${plural(rows.length,'truck')}`}</span></div><label className="search"><Search size={16}/><input aria-label="Search plate, model or profile" placeholder="Search plate, model or profile…" value={search} onChange={e=>reset(setSearch)(e.target.value)}/></label></div>
+  <div className="card-heading"><div className="title-count"><h2>Trucks by maintenance cost</h2><span className="count" aria-live="polite">{filtered.length===rows.length?plural(rows.length,'truck'):`${filtered.length} of ${plural(rows.length,'truck')}`}</span></div><label className="search"><Search size={16}/><input aria-label="Search plate, model or profile" placeholder="Search plate, model or profile…" value={search} onChange={e=>reset(setSearch)(e.target.value)}/></label></div>
   <div className="list-filters">{select('Truck model',model,setModel,models.map(m=>[m,m]))}{select('Operating profile',duty,setDuty,duties.map(d=>[d,d]))}{select('Cost status',cost,setCost,Object.entries(COST))}{select('Specs',specs,setSpecs,Object.entries(SPECS))}</div>
   <FilterChips chips={chips} onClear={clear}/>
   <div className="table-scroll"><table className="list-table"><thead><tr><th>Truck</th>{th('cpk')}{th('ratio')}{th('spend')}{th('distance')}{th('odometer')}<th>Operating profile</th><th>Specs</th></tr></thead>
@@ -70,13 +72,13 @@ export function FleetPage({data,onEdit,onDelete,onLog,onSpecs}){
   {!rows.length&&<div className="empty"><Truck size={25}/><p>No trucks yet. Use Register at workshop to log a truck’s first visit.</p></div>}
   {rows.length>0&&!filtered.length&&<div className="empty"><Search size={25}/><p>No trucks match these filters.</p><button type="button" className="secondary" onClick={clear}>Clear filters</button></div>}
   </div>
-  <Pager total={sorted.length} start={start} shown={visible.length} size={size} onSize={n=>{setSize(n);setPage(1);}} current={current} pages={pages} onPage={setPage} label="Fleet register pages"/>
+  <Pager total={sorted.length} start={start} shown={visible.length} size={size} onSize={n=>{setSize(n);setPage(1);}} current={current} pages={pages} onPage={setPage} label="Trucks by maintenance cost pages"/>
   <div className="section-foot">Sorted by {SORT_LABEL[sort.key]}, {sort.dir==='desc'?'highest':'lowest'} first; unknown values last. Similar trucks = other trucks with the same model and operating profile; their CPK = total spend ÷ total distance. Highlighted rows are at least {ratio(HIGH)} their comparison.</div>
-  {selected&&<TruckPanel row={selected} data={data} onClose={closePanel} onEdit={()=>onEdit(selected.t)} onDelete={()=>onDelete(selected.t)} onLog={()=>onLog(selected.t.id)} onSpecs={()=>onSpecs(selected.t.id)}/>}
+  {selected&&<TruckPanel row={selected} data={data} position={listPosition(ids,selected.t.id,setSelectedId)} onClose={closePanel} onEdit={()=>onEdit(selected.t)} onDelete={()=>onDelete(selected.t)} onLog={()=>onLog(selected.t.id)} onSpecs={()=>onSpecs(selected.t.id)} onVisits={onVisits&&(()=>onVisits(selected.t.id))}/>}
  </section>;
 }
 
-function TruckPanel({row,data,onClose,onEdit,onDelete,onLog,onSpecs}){
+function TruckPanel({row,data,position,onClose,onEdit,onDelete,onLog,onSpecs,onVisits}){
  const {t,cmp,record,reports}=row;
  const records=data.maintenance.filter(m=>m.truckId===t.id);
  const {total,categories}=costBreakdown(records,data.parts);
@@ -87,25 +89,28 @@ function TruckPanel({row,data,onClose,onEdit,onDelete,onLog,onSpecs}){
  const partName=id=>{const p=data.parts.find(p=>p.id===id);return p?`${p.brand} · ${p.name}`:'Part not in catalog';};
  const peerText=cmp.scope==='peers'?`Similar trucks: ${cpk(cmp.cpk)} IDR/km · ${plural(cmp.count,'other truck')} on ${t.model} · ${t.duty}`:cmp.cpk==null?`No other ${t.model} · ${t.duty} truck with distance, and fleet CPK is unknown`:`Fleet CPK ${cpk(cmp.cpk)} IDR/km · no other ${t.model} · ${t.duty} truck with distance`;
  const actions=<><button type="button" className="secondary panel-delete" onClick={onDelete}><Trash2 size={15}/>Delete</button><button type="button" className="secondary" onClick={onEdit}><Pencil size={15}/>Edit truck</button><button type="button" className="secondary" aria-haspopup="dialog" onClick={onSpecs}><Ruler size={15}/>View specs{reports>0&&` · ${plural(reports,'report')}`}</button><button type="button" className="primary" onClick={onLog}><Wrench size={15}/>Log maintenance</button></>;
- return <SidePanel id="truck-panel-title" eyebrow="TRUCK DETAIL" title={t.plate} subtitle={`${t.model} · ${t.duty}`} closeLabel="Close truck details" onClose={onClose} actions={actions}>
-   <dl className="panel-summary">
-    <div><dt>Maintenance CPK</dt><dd>{t.cpk==null?'unknown':<>{cpk(t.cpk)} <span>IDR/km</span></>}</dd>{t.cpk==null&&<small>No distance tracked yet</small>}</div>
-    <div><dt>{cmp.scope==='peers'?'vs similar trucks':'vs fleet'}</dt><dd className={cmp.ratio!==null&&cmp.ratio>=HIGH?'ratio high':''}>{cmp.ratio===null?'—':ratio(cmp.ratio)}</dd><small>{peerText}</small></div>
-    <div><dt>Maintenance spend</dt><dd>{records.length?money(spend):'—'}</dd><small>{plural(records.length,'workshop visit')}</small></div>
-    <div><dt>Distance tracked</dt><dd>{number(t.distance)} <span>km</span></dd><small>Since {date(t.baselineDate)} · odometer {number(t.odometer)} km</small></div>
-   </dl>
-   {!records.length?<div className="empty panel-empty"><Wrench size={25}/><p>No workshop visits yet. Log maintenance to start tracking CPK.</p><button type="button" className="primary" onClick={onLog}><Wrench size={15}/>Log maintenance</button></div>:<>
-   <section className="panel-section"><h3>Where the cost comes from</h3>
+ const summary=<dl className="panel-summary">
+   <div><dt>Maintenance CPK</dt><dd>{t.cpk==null?'unknown':<>{cpk(t.cpk)} <span>IDR/km</span></>}</dd>{t.cpk==null&&<small>No distance tracked yet</small>}</div>
+   <div><dt>{cmp.scope==='peers'?'vs similar trucks':'vs fleet'}</dt><dd className={cmp.ratio!==null&&cmp.ratio>=HIGH?'ratio high':''}>{cmp.ratio===null?'—':ratio(cmp.ratio)}</dd><small>{peerText}</small></div>
+   <div><dt>Maintenance spend</dt><dd>{records.length?money(spend):'—'}</dd><small>{plural(records.length,'workshop visit')}</small></div>
+   <div><dt>Distance tracked</dt><dd>{number(t.distance)} <span>km</span></dd><small>Since {date(t.baselineDate)} · odometer {number(t.odometer)} km</small></div>
+  </dl>;
+ // Without visits there is nothing to break down, so the modal shows one empty state instead of three empty tabs.
+ const tabs=records.length?[
+  {id:'cost',label:'Cost breakdown',content:<section className="panel-section"><h3>Where the cost comes from</h3>
     {spend>0?<><div className="cost-bar" aria-hidden="true">{parts.filter(p=>p[1]>0).map(([label,amount,cls])=><span key={label} className={cls} style={{width:`${amount/spend*100}%`}}/>)}</div>
     <ul className="cost-legend">{parts.map(([label,amount,cls])=><li key={label}><span className={'swatch '+cls}/><span>{label}</span><strong>{money(amount)}</strong><small>{share(amount/spend)}</small></li>)}</ul>
     <h4>Parts and installation by category</h4>{categories.length?<ul className="category-list">{categories.map(([name,amount])=><li key={name}><span>{name}</span><strong>{money(amount)}</strong><small>{share(amount/spend)} of spend</small></li>)}</ul>:<p className="panel-note">No parts recorded. All visits were labor or other charges only.</p>}</>
     :<p className="panel-note">The recorded visits have no costs entered.</p>}
-   </section>
-   <section className="panel-section"><h3>Most expensive visits</h3><p className="panel-note">{records.length>5?`Top 5 of ${records.length} visits by total cost`:`All ${plural(records.length,'visit')}, by total cost`}</p>
+   </section>},
+  {id:'visits',label:'Visits',count:records.length,content:<section className="panel-section"><h3>Most expensive visits</h3><p className="panel-note">{records.length>5?`Top 5 of ${records.length} visits by total cost`:`All ${plural(records.length,'visit')}, by total cost`}</p>
     <ol className="visit-list">{top.map(m=><li key={m.id}><div className="visit-head"><strong>{money(eventCost(m))}</strong><span>{date(m.date)} · {number(m.odometer)} km · {m.workshop}</span></div>{m.notes&&<p>{m.notes}</p>}
      <ul>{m.items.map((i,k)=><li key={k}>{partName(i.partId)} · {i.position} · {number(i.quantity)} × {money(i.unitCost)}{Number(i.labor)>0&&` + ${money(i.labor)} installation`}</li>)}{!m.items.length&&<li>No parts · labor or other charges only</li>}{(Number(m.labor)>0||Number(m.otherCost)>0)&&<li>General labor {money(m.labor)} · other charges {money(m.otherCost)}</li>}</ul></li>)}</ol>
-   </section>
-   <section className="panel-section"><h3>Parts in service</h3>{active.length?<ul className="service-list">{active.map(c=><li key={c.installationId}><div><strong>{c.brand} · {c.category}</strong><small>{c.position}{c.quantity>1?` · ${c.quantity} units tracked together`:''}</small></div><div><strong>{number(c.distance)} km</strong><small>since install on {date(c.startDate)} at {number(c.odometer)} km</small></div></li>)}</ul>:<p className="panel-note">No parts recorded as installed. Parts appear here after a workshop visit logs them.</p>}</section>
-   </>}
- </SidePanel>;
+    {onVisits&&<button type="button" className="text-button see-all" onClick={onVisits}>{records.length===1?'See this visit in Maintenance':`See all ${records.length} visits in Maintenance`}<ArrowRight size={14}/></button>}
+   </section>},
+  {id:'service',label:'Parts in service',count:active.length,content:<section className="panel-section"><h3>Parts in service</h3>{active.length?<ul className="service-list">{active.map(c=><li key={c.installationId}><div><strong>{c.brand} · {c.category}</strong><small>{c.position}{c.quantity>1?` · ${c.quantity} units tracked together`:''}</small></div><div><strong>{number(c.distance)} km</strong><small>since install on {date(c.startDate)} at {number(c.odometer)} km</small></div></li>)}</ul>:<p className="panel-note">No parts recorded as installed. Parts appear here after a workshop visit logs them.</p>}</section>},
+ ]:null;
+ return <DetailModal id="truck-panel-title" itemId={t.id} eyebrow="TRUCK DETAIL" title={t.plate} subtitle={`${t.model} · ${t.duty}`} summary={summary} position={position} noun="truck" closeLabel="Close truck details" onClose={onClose} tabs={tabs} actions={actions}>
+  <div className="empty panel-empty"><Wrench size={25}/><p>No workshop visits yet. Log maintenance to start tracking CPK.</p><button type="button" className="primary" onClick={onLog}><Wrench size={15}/>Log maintenance</button></div>
+ </DetailModal>;
 }

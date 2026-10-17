@@ -1,0 +1,13 @@
+# Secrets and local data never go into the image; keys are set as Cloud Run environment variables.
+.env
+.env.*
+!.env.example
+data/
+dist/
+node_modules/
+.git/
+mobile/
+kilometric-mobile-ui-en/
+anti-slop/
+docs/
+test/

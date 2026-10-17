@@ -1,0 +1,15 @@
+# Files `gcloud run deploy --source .` does not upload. Secrets and local data stay on this machine.
+.gcloudignore
+.git/
+.gitignore
+.env
+.env.*
+!.env.example
+data/
+dist/
+node_modules/
+mobile/
+kilometric-mobile-ui-en/
+anti-slop/
+docs/
+test/

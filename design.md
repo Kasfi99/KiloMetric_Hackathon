@@ -57,7 +57,7 @@ Pengguna target: driver, HP Android menengah, sinyal tidak stabil, pakai satu ta
 - Konfigurasi `app.json`/`app.config.ts`:
   - `scheme: "kilometric"`, `name: "KiloMetric Driver"`, `slug: "kilometric-driver"`.
   - `extra.apiUrl` dibaca dari env `EXPO_PUBLIC_API_URL` (default `http://10.0.2.2:3000` untuk emulator Android). Untuk HP fisik, server dijalankan dengan `npm run dev:lan`, yang mencetak `LAN: http://<ip>:3000`; URL itu dipakai sebagai `EXPO_PUBLIC_API_URL`. Tulis langkah ini di `mobile/README.md`. Android memblokir HTTP biasa secara default di build non-debug, jadi untuk dev build set `android.usesCleartextTraffic: true` (lewat `expo-build-properties`), khusus demo.
-  - Database demo fresh sudah berisi 3 order (`DO-DEMO-001`–`003`) untuk `driver@demo.id`, jadi layar Order tidak kosong saat pertama login.
+  - Database demo fresh sudah berisi 8 order (`DO-DEMO-001`–`008`; 004–008 rute jauh lintas Jawa) untuk `driver@demo.id`, jadi layar Order tidak kosong saat pertama login.
   - Plugin `expo-location` dengan:
     ```json
     ["expo-location", {

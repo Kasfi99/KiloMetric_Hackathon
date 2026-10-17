@@ -57,7 +57,7 @@ test('mobile login returns a bearer token that authenticates without cookies',as
  assert.equal((await call('/api/state')).status,401);
  const state=await call('/api/state','GET',undefined,{authorization:`Bearer ${login.data.token}`});
  assert.equal(state.status,200);assert.equal(state.data.currentUser.role,'driver');
- assert.deepEqual(state.data.orders.map(o=>o.reference),['DO-DEMO-001','DO-DEMO-002','DO-DEMO-003'],'fresh demo database seeds assigned demo orders');
+ assert.deepEqual(state.data.orders.map(o=>o.reference),['DO-DEMO-001','DO-DEMO-002','DO-DEMO-003','DO-DEMO-004','DO-DEMO-005','DO-DEMO-006','DO-DEMO-007','DO-DEMO-008'],'fresh demo database seeds assigned demo orders');
  assert.ok(state.data.orders.every(o=>o.status==='assigned'&&!('source' in o)));
  assert.equal((await call('/api/state','GET',undefined,{authorization:'Bearer deadbeef'})).status,401);
  assert.equal((await call('/api/logout','POST',undefined,{authorization:`Bearer ${login.data.token}`})).status,200);

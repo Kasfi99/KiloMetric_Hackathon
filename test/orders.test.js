@@ -11,7 +11,7 @@ import {documentInput,extractOrders,googleOrderRoute,estimateCosts,newOrder,revi
 test('demo orders: assigned to the demo driver on their trucks, valid fields, ready to start',()=>{
  const db=seed();db.users=demoUsers(db.trucks);db.trips=[];
  const orders=demoOrders(db.users),driver=db.users.find(u=>u.role==='driver'),admin=db.users.find(u=>u.role==='admin');
- assert.equal(orders.length,3);assert.equal(new Set(orders.map(o=>o.reference)).size,3);
+ assert.equal(orders.length,8);assert.equal(new Set(orders.map(o=>o.reference)).size,8);
  for(const o of orders){
   assert.equal(o.status,'assigned');assert.equal(o.driverId,driver.id);assert.ok(driver.assignedTruckIds.includes(o.truckId));
   assert.ok(o.reviewedAt);assert.equal(o.reviewedBy,admin.id);assert.equal(o.source.kind,'demo_seed');assert.equal(o.estimate,null);

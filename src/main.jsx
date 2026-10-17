@@ -10,6 +10,7 @@ import {api as request,Login,TripsPage,UsersPage,IntegrationSettings} from './dr
 import {TruckSpecsPanel} from './truck-specs.jsx';
 import {FleetPage} from './fleet.jsx';
 import {PartsPage} from './parts.jsx';
+import {MaintenanceHistory} from './maintenance.jsx';
 import {money,number,cpk,date} from './format.js';
 
 const nav=[['overview','Overview',LayoutDashboard],['trucks','Fleet & trucks',Truck],['parts','Spare parts',Package],['maintenance','Maintenance',Wrench],['optimizer','Mix optimizer',Layers],['ai','Gemini insights',Sparkles],['trips','Trips & GPS',Route],['orders','Delivery orders',Package],['users','People & access',Layers]];
@@ -55,7 +56,7 @@ export function App({initialData=null,initialPage='maintenance',onLogout=()=>{}}
   {page==='trucks'&&<FleetPage data={data} onEdit={t=>open('trucks',t)} onDelete={t=>setModal({type:'delete',entity:'trucks',record:t})} onLog={truckId=>setModal({type:'maintenance',truckId})} onSpecs={setSpecTruckId}/>}
   {page==='trucks'&&data.trucks.some(t=>t.id===specTruckId)&&<TruckSpecsPanel truck={data.trucks.find(t=>t.id===specTruckId)} role={role} reload={load} notify={notify} onClose={()=>setSpecTruckId(null)}/>}
   {page==='parts'&&<PartsPage data={data} onEdit={p=>open('parts',p)} onDelete={p=>setModal({type:'delete',entity:'parts',record:p})} onCompare={permissions.includes('optimizer')?()=>go('optimizer'):null}/>}
-  {page==='maintenance'&&<><section className="card workshop-intro"><div><span className="eyebrow">START WITH THE WORKSHOP VISIT</span><h2>A single entry keeps everything in sync.</h2><p>Choose a truck or register one here, enter its odometer, and record the work and costs.</p></div><div className="workshop-flow"><span><Truck size={17}/>1. Identify truck</span><ArrowRight size={14}/><span><Wrench size={17}/>2. Enter service</span><ArrowRight size={14}/><span><Route size={17}/>3. CPK updates</span></div></section><section className="card"><TableHeader title="Maintenance history" count={data.maintenance.length} query={query} setQuery={setQuery} placeholder="Search truck, workshop, or notes…"/><MaintenanceTable records={data.maintenance.filter(m=>matches({...m,truck:data.trucks.find(t=>t.id===m.truckId)?.plate})).sort((a,b)=>b.date.localeCompare(a.date))} data={data} onEdit={r=>open('maintenance',r)} onDelete={r=>setModal({type:'delete',entity:'maintenance',record:r})}/></section></>}
+  {page==='maintenance'&&<><section className="card workshop-intro"><div><span className="eyebrow">START WITH THE WORKSHOP VISIT</span><h2>A single entry keeps everything in sync.</h2><p>Choose a truck or register one here, enter its odometer, and record the work and costs.</p></div><div className="workshop-flow"><span><Truck size={17}/>1. Identify truck</span><ArrowRight size={14}/><span><Wrench size={17}/>2. Enter service</span><ArrowRight size={14}/><span><Route size={17}/>3. CPK updates</span></div></section><MaintenanceHistory data={data} onEdit={r=>open('maintenance',r)} onDelete={r=>setModal({type:'delete',entity:'maintenance',record:r})} onLog={()=>open('maintenance')}/></>}
   {page==='optimizer'&&<Optimizer data={data}/>}
   {page==='ai'&&<AI data={data} reload={load} notify={notify}/>}
   {page==='settings'&&<><SettingsPage data={data}/><IntegrationSettings data={data} reload={load} notify={notify}/></>}

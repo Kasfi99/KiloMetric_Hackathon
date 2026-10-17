@@ -41,3 +41,6 @@
 .peer-list li>div:last-child{text-align:left}
 }
 .panel-compare{white-space:normal;text-align:center}
+/* Date filters in list tables (Maintenance history). */
+.list-filter input{width:150px;height:34px;font-size:10px;text-transform:none;letter-spacing:0;padding:6px 10px}
+@media(max-width:700px){.list-filter input{width:100%}}

@@ -22,7 +22,7 @@ Open **http://localhost:3000**. The backend serves the API and Vite frontend thr
 ```sh
 npm test
 npm run build
-npm start -- --production
+npm start                 # production: serves built dist/ (no Vite)
 ```
 
 The production command serves the built `dist/` frontend. Change `PORT` in `.env` if needed.
@@ -239,6 +239,6 @@ Choose a truck-routing provider with verified Indonesian restriction coverage. G
 
 The production build includes a web app manifest, 192/512-pixel maskable icons, service worker, install controls, and a public offline status page. The service worker does **not** cache authenticated API responses or GPS records. It does not queue offline writes. Offline startup shows the status page; active trip records remain on the server. Reconnect and resume tracking after interruptions.
 
-Use `npm run build` and `npm start -- --production` for installation testing. Desktop localhost is trusted for development, but a phone cannot use your computer's localhost address. Serve the app at a reachable **HTTPS origin** through a reverse proxy; set `APP_ORIGIN=https://your-host`, `COOKIE_SECURE=1`, and `HOST` as appropriate for that deployment. Do not expose the public demo credentials on the internet. Phone deployment has not been performed by this project.
+Use `npm run build` and `npm start` (production mode) for installation testing. Desktop localhost is trusted for development, but a phone cannot use your computer's localhost address. Serve the app at a reachable **HTTPS origin** through a reverse proxy; set `APP_ORIGIN=https://your-host`, `COOKIE_SECURE=1`, and `HOST` as appropriate for that deployment. Do not expose the public demo credentials on the internet. Phone deployment has not been performed by this project.
 
 Geolocation requires permission and a secure context. PWA tracking is **foreground only**; hidden tabs and locked screens do not reliably receive updates. The driver UI shows offline/hidden/interrupted status and dispatch sees the age of the latest location. Continuous background tracking requires a different mobile architecture. Sources: https://developer.mozilla.org/en-US/docs/Web/API/Geolocation/watchPosition and https://www.w3.org/TR/geolocation/ .

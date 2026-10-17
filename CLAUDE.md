@@ -65,7 +65,7 @@ Open decisions (§18): pilot region, routing provider with Indonesian truck-rest
 npm install
 npm run dev          # node server.js — API + Vite dev middleware on one port (http://localhost:3000)
 npm run build        # vite build -> dist/
-npm start -- --production   # serve built dist/ (no Vite)
+npm start            # node server.js --production: serve built dist/ (no Vite)
 npm test             # node --test (all of test/)
 node --test test/orders.test.js                      # single file
 node --test --test-name-pattern="CRUD" test/api.test.js   # single test by name

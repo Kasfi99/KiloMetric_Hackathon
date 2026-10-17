@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node server.js",
     "dev:lan": "HOST=0.0.0.0 node server.js",
-    "start": "node server.js",
+    "start": "node server.js --production",
     "build": "vite build",
     "test": "node --test",
     "demo:reset": "node scripts/demo-reset.mjs",

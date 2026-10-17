@@ -89,12 +89,12 @@ export function PartsPage({data,onEdit,onDelete,onCompare}){
 
 function PartPanel({row,rows,model,position,data,onClose,onSelect,onEdit,onDelete,onCompare}){
  const {p,stats,lowest,ratio:r,best,measured}=row;
- // The status filter starts at All for each part (the modal itself stays open across ‹ › and brand switches).
- const [filter,setFilter]=useState({id:p.id,status:'all'}),status=filter.id===p.id?filter.status:'all',setStatus=s=>setFilter({id:p.id,status:s});
+ // The status filter and history page start fresh for each part (the modal itself stays open across ‹ › and brand switches).
+ const [filter,setFilter]=useState({id:p.id,status:'all',page:1,size:10}),cur=filter.id===p.id?filter:{id:p.id,status:'all',page:1,size:10},status=cur.status,setStatus=s=>setFilter({...cur,status:s,page:1});
  const peers=rows.filter(x=>x.p.category===p.category).sort((x,y)=>(x.stats.cpk===null)-(y.stats.cpk===null)||(x.stats.cpk??0)-(y.stats.cpk??0)||byName(x,y));
  const history=stats.cycles.slice().sort((a,b)=>b.startDate.localeCompare(a.startDate));
  const counts={all:history.length,completed:history.filter(c=>c.status==='completed').length,active:history.filter(c=>c.status==='active').length};
- const shown=status==='all'?history:history.filter(c=>c.status===status);
+ const shown=status==='all'?history:history.filter(c=>c.status===status),hist=paginate(shown,cur.page,cur.size);
  const plate=id=>data.trucks.find(t=>t.id===id)?.plate||'Truck not registered';
  const on=model?` on ${model} trucks`:'';
  const actions=<><button type="button" className="secondary panel-delete" onClick={onDelete}><Trash2 size={15}/>Delete</button><button type="button" className="secondary" onClick={onEdit}><Pencil size={15}/>Edit part</button>{onCompare&&<button type="button" className="primary panel-compare" onClick={onCompare}>Compare by model & profile in Mix optimizer<ArrowUpRight size={15}/></button>}</>;
@@ -111,7 +111,7 @@ function PartPanel({row,rows,model,position,data,onClose,onSelect,onEdit,onDelet
   <section className="panel-section"><h3>Other brands in {p.category}</h3>{peers.length>1?<><p className="panel-note">Lowest observed CPK first{on}.</p><ul className="peer-list">{peers.map(x=><li key={x.p.id}><div>{x.p.id===p.id?<strong>{x.p.brand} · {x.p.name}</strong>:<button type="button" className="text-button" onClick={()=>onSelect(x.p.id)}>{x.p.brand} · {x.p.name}</button>}<small>{x.p.id===p.id?'This part':x.p.sku}</small></div><div><strong>{x.stats.cpk===null?'—':`${cpk(x.stats.cpk)} IDR/unit/km`}</strong><small>{x.stats.avgLife===null?'No completed lifecycle yet':`${number(x.stats.avgLife)} km avg life`} · {evidenceText(x.stats)}{limited(x.stats)?' · limited evidence':''}</small></div></li>)}</ul></>:<p className="panel-note">No other part in {p.category} in the catalog. Add one to compare brands.</p>}</section></>},
   {id:'history',label:'Lifecycle history',count:history.length,content:<section className="panel-section"><h3>Installation & replacement history</h3>
    {history.length>0&&<div className="segmented" role="group" aria-label="Filter history by status">{Object.entries(HISTORY).map(([k,label])=><button type="button" key={k} aria-pressed={status===k} className={'segment'+(status===k?' active':'')} onClick={()=>setStatus(k)}>{label}<span>{counts[k]}</span></button>)}</div>}
-   {shown.length>0&&<div className="table-scroll"><table className="panel-table"><thead><tr><th>Truck / position</th><th>Installed</th><th>Replaced</th><th>Life / distance</th><th>Installed cost</th><th>Part CPK</th><th>Status</th></tr></thead><tbody>{shown.map((c,i)=><tr key={c.installationId||i}>
+   {shown.length>0&&<div className="table-scroll"><table className="panel-table"><thead><tr><th>Truck / position</th><th>Installed</th><th>Replaced</th><th>Life / distance</th><th>Installed cost</th><th>Part CPK</th><th>Status</th></tr></thead><tbody>{hist.visible.map((c,i)=><tr key={c.installationId||i}>
     <td><strong>{plate(c.truckId)}</strong><small>{c.model} · {c.duty}</small><small>{c.position}{c.quantity>1?` · ${c.quantity} units tracked together`:''}</small></td>
     <td>{number(c.odometer)} km<small>{date(c.startDate)}</small></td>
     <td>{c.status==='completed'?`${number(c.endOdometer)} km`:'—'}<small>{c.endDate?date(c.endDate):'Still installed'}</small></td>
@@ -120,6 +120,7 @@ function PartPanel({row,rows,model,position,data,onClose,onSelect,onEdit,onDelet
     <td><strong className="num">{c.status==='active'?'—':cpk(c.unitCpk)}</strong><small>{c.status==='active'?'Awaiting replacement':c.distance===0?'No distance recorded':c.quantity>1?'IDR/unit/km · allocated':'IDR/km'}</small></td>
     <td><span className="pill">{c.status==='active'?'In service':'Replaced'}</span></td>
    </tr>)}</tbody></table></div>}
+   {shown.length>10&&<Pager total={shown.length} start={hist.start} shown={hist.visible.length} size={cur.size} onSize={n=>setFilter({...cur,size:n,page:1})} current={hist.current} pages={hist.pages} onPage={n=>setFilter({...cur,page:n})} label="Lifecycle history pages"/>}
    {!history.length&&<p className="panel-note">No installations of this part recorded{on}. Log one during a workshop visit to start tracking.</p>}
    {history.length>0&&!shown.length&&<p className="panel-note">No {status==='active'?'installations still in service':'replaced installations'}{on}.</p>}
    <p className="panel-note history-note">A replacement at the same category and position closes the old part’s life, even when the new brand differs. Grouped records allocate installation labor evenly across units and assume a shared lifespan.</p>

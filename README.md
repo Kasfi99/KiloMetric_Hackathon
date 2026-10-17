@@ -141,7 +141,7 @@ API documentation: https://ai.google.dev/api/generate-content
 
 ## Data and backup
 
-`data/fleet.json` is created with sample data on first launch, updated atomically, and survives restarts. Settings → Export data backup downloads a business-data snapshot without password hashes. For a full recovery backup including users and GPS point history, stop the server and copy `data/fleet.json` securely. The UI export is for review, not full restoration: it excludes authentication records and includes only the latest GPS point per trip. Restore from the full server file instead.
+`data/fleet.json` is created with sample data on first launch (18 fictional trucks across Hino 500, Isuzu Giga and Mitsubishi Fuso, 12 parts, about 21 months of generated workshop history from `lib/seed.js`, including a few high-cost trucks and one new truck with unknown CPK), updated atomically, and survives restarts. Settings → Export data backup downloads a business-data snapshot without password hashes. For a full recovery backup including users and GPS point history, stop the server and copy `data/fleet.json` securely. The UI export is for review, not full restoration: it excludes authentication records and includes only the latest GPS point per trip. Restore from the full server file instead.
 
 To restore the demo state (fresh sample data, demo accounts, three assigned demo orders), stop the server and run `npm run demo:reset`. It moves `data/fleet.json` and `data/photos/` into `data/backups/<timestamp>/`, and the server reseeds on the next start. It refuses to run while a server answers on `PORT` (default 3000), because the running server would write its in-memory data back. Signed-in phones must sign in again.
 

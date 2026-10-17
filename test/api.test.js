@@ -17,7 +17,7 @@ test('API handlers: CRUD, validation, CPK recalculation, origin protection, and 
    handleRequest(req,res).catch(reject);
   });
   assert.equal((await call('/api/login','POST',{email:'admin@demo.id',password:'demo1234'})).status,200);
-  const initial=(await call('/api/state')).data;assert.equal(initial.trucks.length,6);
+  const initial=(await call('/api/state')).data;assert.equal(initial.trucks.length,18);
   const truck={plate:'TEST 01',model:'Hino 500',duty:'Regional haul',baselineDate:'2025-01-01',baselineOdometer:1000,odometer:3000};
   assert.equal((await call('/api/trucks','POST',truck,'https://evil.example')).status,403);
   assert.equal((await call('/api/trucks','POST',truck)).status,200);
@@ -41,7 +41,7 @@ test('API handlers: CRUD, validation, CPK recalculation, origin protection, and 
   assert.equal((await call(`/api/parts/${p.id}`,'PUT',{...part,price:200000})).status,200);
   assert.equal((await call(`/api/parts/${p.id}`,'DELETE')).status,200);
   assert.equal((await call('/api/state')).data.analytics.totalSpend,initial.analytics.totalSpend);
-  assert.equal(JSON.parse(await readFile(process.env.DATA_FILE,'utf8')).trucks.length,6);
+  assert.equal(JSON.parse(await readFile(process.env.DATA_FILE,'utf8')).trucks.length,18);
  }finally{await rm(dir,{recursive:true,force:true});}
 });
 

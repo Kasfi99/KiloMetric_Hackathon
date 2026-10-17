@@ -9,9 +9,10 @@ import { analytics } from './lib/analytics.js';
 import { normalize, validate } from './lib/validation.js';
 import { rememberReportedMileage, syncWorkshopMileage } from './lib/workshop.js';
 import {roles,hashPassword,verifyPassword,publicUser,demoUsers,migrateLegacyDemoAccounts,sessionManager,sessionCookie,canManageFleet,visibleData} from './lib/auth.js';
-import {createTrip,addLocations,completeTrip,truckSpecifications,locationPoint} from './lib/trips.js';
+import {createTrip,addLocations,completeTrip,tripSpecifications,masterSpecifications,storedSpecifications,locationPoint} from './lib/trips.js';
 import {documentInput,extractOrders,newOrder,reviseOrder,googleOrderRoute,estimateCosts,attachOrderToTrip,completeOrderForTrip} from './lib/orders.js';
 import {previewRoutes,routeStops} from './lib/routing.js';
+import {isPermutation} from './lib/stop-order.js';
 import {LANGS} from './lib/route-messages.js';
 import {photoInput,readOdometer,compareOdometer,consumeCheck} from './lib/odometer.js';
 
@@ -21,7 +22,7 @@ const port=Number(process.env.PORT||3000);
 const dataFile=process.env.DATA_FILE||path.join(root,'data','fleet.json');
 await mkdir(path.dirname(dataFile),{recursive:true});
 let db;
-try { db=JSON.parse(await readFile(dataFile,'utf8')); validate(db); } catch(e) { if(e.code!=='ENOENT') throw e; db=seed(); validate(db); await writeFile(dataFile,JSON.stringify(db,null,2),{mode:0o600}); }
+try { db=JSON.parse(await readFile(dataFile,'utf8')); for(const t of db.trucks||[])t.specifications=storedSpecifications(t.specifications); validate(db); } catch(e) { if(e.code!=='ENOENT') throw e; db=seed(); validate(db); await writeFile(dataFile,JSON.stringify(db,null,2),{mode:0o600}); }
 const demoMode=process.env.DEMO_MODE!=='0';
 if(!db.users){
   if(demoMode){db.users=demoUsers(db.trucks);if(process.env.DEMO_ORDERS!=='0'&&!db.orders?.length)db.orders=demoOrders(db.users);}
@@ -38,7 +39,7 @@ const secureCookie=process.env.COOKIE_SECURE==='1';
 const allowedOrigins=new Set([`http://localhost:${port}`,`http://127.0.0.1:${port}`,...(process.env.APP_ORIGIN||'').split(',').map(v=>v.trim()).filter(Boolean)]);
 const orsKey=()=>process.env.DISABLE_ORS==='1'?'':process.env.ORS_API_KEY||'';
 // Odometer photo checks wait here (bytes included) until a trip start/complete uses them; photos are written only then.
-const odometerChecks=new Map(),odometerAttempts=new Map(),CHECK_TTL_MS=30*60*1000,photosDir=path.join(path.dirname(dataFile),'photos');
+const odometerChecks=new Map(),CHECK_TTL_MS=30*60*1000,photosDir=path.join(path.dirname(dataFile),'photos');
 const takeCheck=id=>{const c=typeof id==='string'?odometerChecks.get(id):undefined;return c&&Date.now()-Date.parse(c.at)<=CHECK_TTL_MS?c:undefined;};
 const integrations=()=>({maps:{keyConfigured:Boolean(process.env.MAPS_API_KEY),status:process.env.MAPS_API_KEY?'order_distance_configured':'not_configured'},routing:{keyConfigured:Boolean(orsKey()),provider:orsKey()?'ors':'fixture',status:orsKey()?'connected':'fixture_only',priority:'fastest',tollsAllowed:true,truckRestrictionsSource:orsKey()?'openrouteservice_hgv_profile':'none'},elevation:{keyConfigured:Boolean(process.env.ELEVATION_API_KEY),status:'not_connected'}});
 let queue=Promise.resolve();
@@ -68,7 +69,15 @@ async function runAI() {
 }
 const json=(res,status,data)=>{res.writeHead(status,{'content-type':'application/json','cache-control':'no-store'});res.end(JSON.stringify(data));};
 async function body(req,limit=262144) { let raw=''; for await(const chunk of req) { raw+=chunk; if(Buffer.byteLength(raw)>limit) throw new Error('Request too large.'); } try{return JSON.parse(raw);}catch{throw new Error('Invalid JSON request.');} }
-const ocrAttempts=new Map();let ocrRunning=0;
+let ocrRunning=0;
+// Every endpoint that calls Gemini: 5 calls per minute per user and endpoint (AI_RATE_LIMIT_PER_MINUTE overrides).
+const aiCalls=new Map();
+function aiLimited(res,user,name){
+  const max=Number(process.env.AI_RATE_LIMIT_PER_MINUTE)||5,key=`${name}:${user.id}`,now=Date.now(),hit=aiCalls.get(key);
+  const win=hit&&hit.until>now?hit:{until:now+60000,count:0};
+  if(win.count>=max){const s=Math.ceil((win.until-now)/1000);res.writeHead(429,{'content-type':'application/json','cache-control':'no-store','retry-after':String(s)});res.end(JSON.stringify({error:`AI request limit reached (${max} per minute). Try again in ${s} s.`,retryAfterSeconds:s}));return true;}
+  win.count++;aiCalls.set(key,win);return false;
+}
 const production=process.argv.includes('--production');
 const noListen=process.env.FLEETWISE_NO_LISTEN==='1';
 const vite=production||noListen?null:await (await import('vite')).createServer({root,server:{middlewareMode:true},appType:'spa'});
@@ -113,9 +122,8 @@ export async function handleRequest(req,res){
       if(user.role!=='admin')return json(res,403,{error:'Only administrators can manage or extract delivery orders.'});
       if(req.method==='POST'&&id==='extract'&&!action){
         if(!configured)return json(res,503,{error:'Gemini OCR is not configured. Set GEMINI_API_KEY and restart, or create an order manually.'});
-        const now=Date.now(),attempt=ocrAttempts.get(user.id);
-        if(ocrRunning>=2||(attempt&&attempt.until>now&&attempt.count>=10))return json(res,429,{error:'OCR is busy or the extraction limit was reached. Try again shortly.'});
-        ocrAttempts.set(user.id,{until:attempt?.until>now?attempt.until:now+60000,count:attempt?.until>now?attempt.count+1:1});
+        if(ocrRunning>=2)return json(res,429,{error:'OCR is busy. Try again shortly.'});
+        if(aiLimited(res,user,'orders-extract'))return;
         ocrRunning++;
         try{
           const document=documentInput(await body(req,12*1024*1024));
@@ -179,9 +187,7 @@ export async function handleRequest(req,res){
     }
     if(req.method==='POST'&&url.pathname==='/api/odometer/read'){
       if(user.role!=='driver')return json(res,403,{error:'Only drivers can check odometer photos.'});
-      const now=Date.now(),attempt=odometerAttempts.get(user.id);
-      if(attempt&&attempt.until>now&&attempt.count>=10)return json(res,429,{error:'Too many photo checks. Try again in a minute.'});
-      odometerAttempts.set(user.id,{until:attempt?.until>now?attempt.until:now+60000,count:attempt?.until>now?attempt.count+1:1});
+      if(aiLimited(res,user,'odometer-read'))return;
       const input=await body(req,5*1024*1024);
       if(!['start','end'].includes(input.stage))throw new Error('Odometer photo stage must be start or end.');
       const typedKm=Number(input.typedKm);
@@ -189,6 +195,7 @@ export async function handleRequest(req,res){
       const photo=photoInput(input.image);
       const read=await readOdometer(photo,{apiKey:configured?process.env.GEMINI_API_KEY:'',model:process.env.GEMINI_ROUTE_MODEL||model});
       const status=compareOdometer(typedKm,read),checkId=randomUUID();
+      const now=Date.now();
       for(const [key,c] of odometerChecks)if(now-Date.parse(c.at)>CHECK_TTL_MS)odometerChecks.delete(key);
       // Each pending check holds up to 3 MiB of photo bytes; cap memory at about 150 MiB.
       if(odometerChecks.size>=50)odometerChecks.delete(odometerChecks.keys().next().value);
@@ -216,7 +223,7 @@ export async function handleRequest(req,res){
           const trip=createTrip(input,user,next,randomUUID());
           trip.odometerEvidence={start:evidenceFor('start',trip.id,trip.startOdometer)};
           attachOrderToTrip(next,input,user,trip);
-          rememberReportedMileage(next);const truck=next.trucks.find(t=>t.id===trip.truckId);truck.reportedOdometer=trip.startOdometer;truck.specifications=trip.specs;syncWorkshopMileage(next);
+          rememberReportedMileage(next);const truck=next.trucks.find(t=>t.id===trip.truckId);truck.reportedOdometer=trip.startOdometer;syncWorkshopMileage(next);
           trip.maintenanceCpkAtStart=analytics(next).trucks.find(t=>t.id===trip.truckId).cpk;
           next.trips.push(trip);result={tripId:trip.id};
         }else{
@@ -250,27 +257,64 @@ export async function handleRequest(req,res){
     }
     if(req.method==='POST'&&url.pathname==='/api/routes/preview'){
       if(!['driver','manager','admin'].includes(user.role))return json(res,403,{error:'Routing access required.'});
-      const input=await body(req),specs=truckSpecifications(input.specs),origin=locationPoint(input.origin,{fresh:true});
-      let stops,order=null,truckId=typeof input.truckId==='string'?input.truckId:null;
+      if(aiLimited(res,user,'routes-preview'))return;
+      const input=await body(req),origin=locationPoint(input.origin,{fresh:true});
+      let stops,order=null,truckId=typeof input.truckId==='string'?input.truckId:null,stopOrderInfo;
+      // stopOrder: entered stop indices in visiting order (pickup excluded, it always comes first).
+      const applyOrder=k=>{const applied=input.stopOrder??Array.from({length:k},(_,i)=>i);if(!isPermutation(applied,k))throw new Error('Stop order must list every stop exactly once.');return applied;};
       if(input.orderId){
         order=db.orders.find(o=>o.id===input.orderId);
         if(!order||(user.role==='driver'&&order.driverId!==user.id))return json(res,403,{error:'Select a delivery order assigned to you.'});
-        // Driver drives from the current GPS position to the pickup first, then the stops in reviewed order.
-        stops=routeStops([{address:order.pickupAddress},...order.stops.map(s=>({address:s.address}))],11);
+        // Driver drives from the current GPS position to the pickup first, then the stops in the applied order.
+        const applied=applyOrder(order.stops.length),picked=applied.map(i=>order.stops[i]);
+        stops=routeStops([{address:order.pickupAddress},...picked.map(s=>({address:s.address}))],11);
+        stopOrderInfo={applied,notes:['',...picked.map(s=>s.notes||'')],fixedFirst:1};
         truckId=order.truckId;
-      } else stops=routeStops(input.stops);
+      } else {
+        const entered=routeStops(input.stops),applied=applyOrder(entered.length);
+        stops=applied.map(i=>entered[i]);stopOrderInfo={applied,notes:stops.map(()=>''),fixedFirst:0};
+      }
       // Cost per route needs the truck's CPK (optional for older clients); drivers may only price their own trucks.
       if(truckId&&(!db.trucks.some(t=>t.id===truckId)||(user.role==='driver'&&!user.assignedTruckIds.includes(truckId))))return json(res,403,{error:'Select a truck assigned to you.'});
+      // Dimensions and weights come from the truck master. A free trip without truckId has none, so restrictions stay unchecked.
+      const {specs}=tripSpecifications(input.specs,truckId?db.trucks.find(t=>t.id===truckId).specifications:null);
       const cpk=truckId?analytics(db).trucks.find(t=>t.id===truckId)?.cpk??null:null;
       const fuel=order?{efficiencyKmPerLiter:order.costInputs?.fuelEfficiencyKmPerLiter??null,priceIdrPerLiter:order.costInputs?.fuelPriceIdrPerLiter??null}:null;
       const lang=LANGS.includes(input.lang)?input.lang:'id';
-      const result=await previewRoutes({origin,specs,stops,lang},{orsKey:orsKey(),gemini:configured?{apiKey:process.env.GEMINI_API_KEY,model:process.env.GEMINI_ROUTE_MODEL||model}:null,cpk,fuel,roughRoadFactor:db.settings.roughRoadFactor});
+      const result=await previewRoutes({origin,specs,stops,lang},{orsKey:orsKey(),googleKey:process.env.DISABLE_MAPS==='1'?null:process.env.MAPS_API_KEY||null,gemini:configured?{apiKey:process.env.GEMINI_API_KEY,model:process.env.GEMINI_ROUTE_MODEL||model}:null,cpk,fuel,roughRoadFactor:db.settings.roughRoadFactor,stopOrderInfo});
       return json(res,result.status,result.body);
+    }
+    const specRoute=url.pathname.match(/^\/api\/trucks\/([^/]+)\/(specifications|spec-reports)$/);
+    if(specRoute){
+      const [,truckId,kind]=specRoute,truck=db.trucks.find(t=>t.id===truckId);
+      if(req.method!==(kind==='specifications'?'PUT':'POST'))return json(res,404,{error:'Not found'});
+      if(kind==='specifications'){
+        if(!['admin','workshop'].includes(user.role))return json(res,403,{error:'Only administrators and workshop staff can set truck specifications.'});
+        if(!truck)return json(res,404,{error:'Truck not found.'});
+        const input=await body(req),specs=masterSpecifications(input&&typeof input==='object'&&'specifications' in input?input.specifications:input);let saved;
+        await transaction(next=>{
+          const t=next.trucks.find(v=>v.id===truckId);if(!t)throw new Error('Truck not found.');
+          const at=new Date().toISOString();t.specifications=specs;
+          for(const r of t.specReports||[])if(!r.resolvedAt){r.resolvedAt=at;r.resolvedBy=user.id;}
+          validate(next);next.revision++;saved=t;
+        });
+        return json(res,200,{truck:saved});
+      }
+      if(user.role!=='driver'||!truck||!user.assignedTruckIds.includes(truckId))return json(res,403,{error:'Only a driver assigned to this truck can report a specification mismatch.'});
+      const input=await body(req),note=typeof input?.note==='string'?input.note.trim():'';
+      if(note.length<5||note.length>300)throw new Error('Describe the mismatch in 5 to 300 characters.');
+      await transaction(next=>{
+        const t=next.trucks.find(v=>v.id===truckId);if(!t)throw new Error('Truck not found.');
+        // Keep the latest 100 reports per truck.
+        t.specReports=[...(t.specReports||[]),{id:randomUUID(),at:new Date().toISOString(),driverId:user.id,driverName:user.name,note,resolvedAt:null,resolvedBy:null}].slice(-100);
+        validate(next);next.revision++;
+      });
+      return json(res,200,{ok:true});
     }
     if(!['POST','PUT','DELETE'].includes(req.method)) return json(res,404,{error:'Not found'});
     if(!canManageFleet(user))return json(res,403,{error:'Your role cannot change fleet or maintenance records.'});
     if(url.pathname==='/api/analyze'&&!['admin','manager'].includes(user.role))return json(res,403,{error:'Fleet analysis requires manager access.'});
-    if(req.method==='POST'&&url.pathname==='/api/analyze') {if(!configured)return json(res,400,{error:'Gemini is not configured. Add your key to .env and restart.'}); if(!aiRunning)runAI().catch(()=>{});return json(res,202,{ok:true});}
+    if(req.method==='POST'&&url.pathname==='/api/analyze') {if(aiLimited(res,user,'analyze'))return; if(!configured)return json(res,400,{error:'Gemini is not configured. Add your key to .env and restart.'}); if(!aiRunning)runAI().catch(()=>{});return json(res,202,{ok:true});}
     const [, ,type,id]=url.pathname.split('/');
     if(!['trucks','parts','maintenance'].includes(type))return json(res,404,{error:'Not found'});
     const input=req.method==='DELETE'?null:await body(req);
@@ -296,6 +340,7 @@ export async function handleRequest(req,res){
         const record=normalize(type,values,req.method==='POST'?randomUUID():id);
         if(type==='trucks') {
           if(index>=0&&next.trucks[index].specifications)record.specifications=next.trucks[index].specifications;
+          if(index>=0&&next.trucks[index].specReports)record.specReports=next.trucks[index].specReports;
           record.reportedOdometer=record.odometer;
           record.trackingMode=index>=0?next.trucks[index].trackingMode||'manual':'manual';
           if(record.trackingMode==='workshop') {

@@ -22,7 +22,8 @@ export function RouteCostBlock({ cost, distanceKm }: { cost: RouteCost; distance
         <Stat label="Est. trip cost" value={rp(cost.totalCost)} unknown={cost.totalCost == null} />
         <Stat label="Trip CPK" value={rp(cost.tripCpk)} unit="/km" unknown={cost.tripCpk == null} />
       </View>
-      <Text style={s.small}>Maintenance {rp(cost.maintenanceCost)} · Fuel {rp(cost.fuelCost)}{cost.fuelCost == null ? ' (no fuel inputs on order)' : ''} · Toll unknown</Text>
+      <Text style={s.small}>Maintenance {rp(cost.maintenanceCost)} · Fuel {rp(cost.fuelCost)}{cost.fuelCost == null ? ' (no fuel inputs on order)' : ''} · {cost.tollCost == null ? 'Toll unknown' : cost.tollCost === 0 ? 'No toll roads' : `Toll ${rp(cost.tollCost)}`}</Text>
+      {cost.tollCost != null && !cost.tollIncluded && <Text style={s.foot}>Toll not in the total: one route has an unknown toll, so totals compare maintenance and fuel only.</Text>}
       {cost.factorApplied && <Text style={[s.foot, { color: C.warningText }]}>Rough-road factor ×{cost.roughRoadFactor} applied (assumption, not calibrated).</Text>}
       {cost.totalCost == null && cost.maintenanceCost != null && <Text style={s.foot}>Total unknown until every part is known. Maintenance alone ≈ {rp(cost.maintenanceCost / distanceKm)}/km.</Text>}
     </View>

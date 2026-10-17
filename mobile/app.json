@@ -54,6 +54,13 @@
           "microphonePermission": false
         }
       ]
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "2f3e2a94-f4bc-4e35-98c1-514e0df828a0"
+      }
+    },
+    "owner": "rocky_saputra"
   }
 }

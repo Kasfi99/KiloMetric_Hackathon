@@ -4,7 +4,7 @@ import {Readable} from 'node:stream';
 import {mkdtemp,mkdir,readFile,rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {truckSpecifications,locationPoint,addLocations,haversine,createTrip,routePlanSnapshot} from '../lib/trips.js';
+import {tripSpecifications,masterSpecifications,storedSpecifications,locationPoint,addLocations,haversine,createTrip,routePlanSnapshot} from '../lib/trips.js';
 import {hashPassword,verifyPassword,demoUsers,demoEmail,DEMO_PASSWORD,migrateLegacyDemoAccounts} from '../lib/auth.js';
 
 test('demo accounts: short credentials, and untouched legacy demo accounts migrate to them',()=>{
@@ -26,10 +26,18 @@ test('demo accounts: short credentials, and untouched legacy demo accounts migra
 const specs={heightM:3.5,widthM:2.4,lengthM:9,axles:3,tareKg:8000,maxGrossKg:20000,loadKg:8000,hazmat:'none'};
 test('password hashes, truck load validation, and GPS quality checks',()=>{
  const hash=hashPassword('test-password');assert.notEqual(hash,'test-password');assert.ok(verifyPassword('test-password',hash));assert.ok(!verifyPassword('wrong',hash));
- assert.equal(truckSpecifications(specs).grossKg,16000);
- assert.throws(()=>truckSpecifications({...specs,loadKg:13000}),/exceed/);
- assert.throws(()=>truckSpecifications({...specs,heightM:''}),/height/);
- assert.throws(()=>truckSpecifications({...specs,axles:2.5}),/whole/);
+ const master={heightM:3.5,widthM:2.4,lengthM:9,axles:3,tareKg:8000,maxGrossKg:20000};
+ assert.equal(tripSpecifications({loadKg:8000,hazmat:'none'},master).specs.grossKg,16000);
+ assert.throws(()=>tripSpecifications({loadKg:13000,hazmat:'none'},master),/exceed/);
+ assert.throws(()=>tripSpecifications({loadKg:1,hazmat:'nuclear'},master),/hazardous/);
+ assert.throws(()=>masterSpecifications({...master,heightM:''}),/height/);
+ assert.throws(()=>masterSpecifications({...master,axles:2.5}),/whole/);
+ assert.throws(()=>masterSpecifications({...master,maxGrossKg:8000}),/above/);
+ assert.deepEqual(tripSpecifications({...specs,heightM:99,tareKg:1},master).specs,{...master,loadKg:8000,hazmat:'none',grossKg:16000},'client dimensions are ignored');
+ const missing=tripSpecifications({loadKg:50000,hazmat:'flammable'},null);
+ assert.equal(missing.source,'missing');assert.equal(missing.specs.grossKg,null);assert.equal(missing.specs.heightM,null);assert.equal(missing.specs.loadKg,50000);
+ assert.deepEqual(storedSpecifications({...master,loadKg:1,hazmat:'none',grossKg:8001}),master,'legacy trip fields are dropped');
+ assert.equal(storedSpecifications({heightM:'x'}),null);
  assert.throws(()=>locationPoint({latitude:-6,longitude:106,accuracy:500,timestamp:Date.now()}),/accuracy/);
  assert.throws(()=>locationPoint({latitude:-6,longitude:106,accuracy:5,timestamp:Date.now()-180000},{fresh:true}),/stale/);
  const p={latitude:-6,longitude:106,accuracy:5,timestamp:Date.now()-60000};
@@ -41,7 +49,7 @@ test('password hashes, truck load validation, and GPS quality checks',()=>{
 
 test('login, server-side RBAC, driver isolation, trip lifecycle and odometer CPK updates',async()=>{
  const dir=await mkdtemp(path.join(os.tmpdir(),'fleetwise-driver-'));
- process.env.DATA_FILE=path.join(dir,'fleet.json');process.env.DISABLE_GEMINI='1';process.env.DISABLE_ORS='1';process.env.FLEETWISE_NO_LISTEN='1';
+ process.env.DATA_FILE=path.join(dir,'fleet.json');process.env.DISABLE_GEMINI='1';process.env.DISABLE_ORS='1';process.env.DISABLE_MAPS='1';process.env.FLEETWISE_NO_LISTEN='1';
  try{
   const {handleRequest}=await import('../server.js');
   function client(){let cookie='';return (url,method='GET',body)=>new Promise((resolve,reject)=>{
@@ -104,7 +112,7 @@ test('routePlan snapshot: validated, stored on trip.routing, optional',()=>{
  const plan={routeId:'ors-1',provider:'ors',distanceKm:152,durationMin:150,polyline:[[-6.2297,106.8295],[-6.9147,107.6098]],restrictions:{checked:['height'],unknown:['truck_bans']},explanation:{recommendedRouteId:'ors-1',headline:'Tercepat'},wasRecommended:true,chosenAt:new Date().toISOString()};
  assert.deepEqual(routePlanSnapshot(plan),plan);
  // Route cost and road condition from the preview travel with the plan (optional; numbers or null).
- const priced={...plan,cost:{maintenanceCost:16800,fuelCost:68000,tollCost:null,totalCost:84800,tripCpk:2120,roughRoadFactor:1.5,factorApplied:true},roadCondition:{pavedKm:36,roughKm:4,unknownKm:0,steepKm:0,ferryKm:0}};
+ const priced={...plan,cost:{maintenanceCost:16800,fuelCost:68000,tollCost:null,totalCost:84800,tripCpk:2120,tollIncluded:false,roughRoadFactor:1.5,factorApplied:true},roadCondition:{pavedKm:36,roughKm:4,unknownKm:0,steepKm:0,ferryKm:0}};
  assert.deepEqual(routePlanSnapshot(priced),priced);
  assert.throws(()=>routePlanSnapshot({...priced,cost:{...priced.cost,totalCost:'lots'}}),/cost/i);
  assert.throws(()=>routePlanSnapshot({...priced,roadCondition:{...priced.roadCondition,roughKm:-1}}),/road condition/i);
@@ -128,6 +136,7 @@ test('routePlan snapshot: validated, stored on trip.routing, optional',()=>{
 test('routes preview RBAC and validation, then trip started with chosen plan is persisted',async()=>{
  // Reuses the server module imported by the lifecycle test above; that test removed its temp dir, so recreate it.
  await mkdir(path.dirname(process.env.DATA_FILE),{recursive:true});
+ process.env.AI_RATE_LIMIT_PER_MINUTE='100'; // this test previews more than 5 times; the limit itself is tested in ratelimit.test.js
  const {handleRequest}=await import('../server.js');
  let cookie='';
  const call=(url,method='GET',body)=>new Promise((resolve,reject)=>{
@@ -200,8 +209,11 @@ test('odometer photo checks: read, consume once on start/complete, photo saved, 
   assert.equal((await call('/api/login','POST',{email:'second@example.com',password:'AnotherDemo!2026'})).status,200);
   const truck=(await call('/api/state')).data.trucks[0],origin={latitude:-6.2297,longitude:106.8295,accuracy:8,timestamp:Date.now()};
   assert.equal((await call('/api/odometer/read','POST',{stage:'start',typedKm:truck.odometer,image:{mimeType:'text/plain',data:'eA=='}})).status,400);
+  // Observed on a phone: the second photo failed with "now is not defined" (expiry sweep runs only when checks are pending).
+  const retake=await call('/api/odometer/read','POST',{stage:'start',typedKm:truck.odometer,image});
+  assert.equal(retake.status,200,retake.data.error);
   const check=await call('/api/odometer/read','POST',{stage:'start',typedKm:truck.odometer,image});
-  assert.equal(check.status,200);assert.equal(check.data.status,'unavailable','Gemini disabled in tests → not verified, not blocked');assert.match(check.data.checkId,/^[a-f0-9-]{36}$/);
+  assert.equal(check.status,200,check.data.error);assert.equal(check.data.status,'unavailable','Gemini disabled in tests → not verified, not blocked');assert.match(check.data.checkId,/^[a-f0-9-]{36}$/);
   const base={truckId:truck.id,destination:'Bandung',specs,specsConfirmed:true,externalRouteConfirmed:true,origin};
   assert.equal((await call('/api/trips','POST',{...base,startOdometer:truck.odometer+5,odometerCheckId:check.data.checkId})).status,400,'typed value must equal the checked value');
   const started=await call('/api/trips','POST',{...base,startOdometer:truck.odometer,odometerCheckId:check.data.checkId});

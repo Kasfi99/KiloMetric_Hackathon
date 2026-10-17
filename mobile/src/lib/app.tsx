@@ -8,11 +8,17 @@ import { startTracking, stopTracking, type TrackingMode } from './tracking';
 import type { AppState, Hazmat, LocationPoint, Order, Preview, Trip, Truck, User } from './types';
 import type { OdometerCheck } from '@/components/OdometerPhoto';
 
-export const SPEC_KEYS = ['heightM', 'widthM', 'lengthM', 'axles', 'tareKg', 'maxGrossKg', 'loadKg'] as const;
-export type SpecKey = typeof SPEC_KEYS[number];
 // Text fields keep what the driver typed (e.g. "3," mid-entry); values are parsed only when validated or sent.
-export type Draft = { orderId: string | null; truckId: string | null; odometer: string; specs: Record<SpecKey, string>; hazmat: Hazmat; confirmed: boolean; destinations: string[]; odometerCheck?: OdometerCheck | null; odometerNote?: string };
+// Truck dimensions and weights are master data, so the draft holds only what the driver declares per trip.
+export type Draft = { orderId: string | null; truckId: string | null; odometer: string; loadKg: string; hazmat: Hazmat; confirmed: boolean; destinations: string[]; odometerCheck?: OdometerCheck | null; odometerNote?: string };
 export const parseNum = (s: string) => { const t = s.trim().replace(',', '.'); return t === '' || !Number.isFinite(Number(t)) ? null : Number(t); };
+// Drafts saved by older versions kept cargo weight in specs.loadKg and were confirmed against typed dimensions.
+function migrateDraft(saved: (Partial<Draft> & { specs?: { loadKg?: unknown } }) | null): Draft | null {
+  if (!saved || typeof saved !== 'object') return null;
+  if (typeof saved.loadKg === 'string') return saved as Draft;
+  const { specs, ...rest } = saved, old = specs?.loadKg;
+  return { ...rest, loadKg: typeof old === 'string' ? old : '', confirmed: false } as Draft;
+}
 
 type Ctx = {
   status: 'loading' | 'signedOut' | 'signedIn'; user: User | null; apiUrl: string; data: AppState | null; loadError: string | null; online: boolean; pending: number;
@@ -68,7 +74,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const offApp = RNAppState.addEventListener('change', s => { if (s === 'active') flush(); });
     (async () => {
       setApiUrl(await getApiUrl());
-      const saved = await readJson<Draft | null>(KEYS.draft, null);
+      const saved = migrateDraft(await readJson<Draft | null>(KEYS.draft, null));
       draftRef.current = saved; setDraftState(saved);
       setPending((await readQueue()).points.length);
       if (!(await getToken())) { setStatus('signedOut'); return; }

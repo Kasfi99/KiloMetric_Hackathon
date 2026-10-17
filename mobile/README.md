@@ -2,7 +2,7 @@
 
 Native Android driver app for KiloMetric. Expo SDK 58, Expo Router, TypeScript. It talks to the KiloMetric server in the parent folder with a bearer token (`POST /api/login` with `client: "mobile"`). The API contract is `../design.md` §4. The visual design follows `../kilometric-mobile-ui-en/`.
 
-Screens: sign-in, orders, order details, pre-trip checks, route options with the AI explanation, active trip, complete trip, history, trip details, account. Maps are MapLibre GL + OpenStreetMap in a WebView, so no Google Maps key is needed in Expo Go or in the APK.
+Screens: sign-in, orders, order details, pre-trip checks, route options with the AI explanation, active trip, complete trip, history, trip details, account. Maps are native Google Maps (`react-native-maps` with `PROVIDER_GOOGLE`); the truck route drawn on them still comes from ORS. Expo Go needs no key. For the APK, enable **Maps SDK for Android**, create a key restricted to Android app `com.kilometric.driver` plus the build's SHA-1 (Expo dashboard → Credentials), and set `GOOGLE_MAPS_ANDROID_API_KEY` in `mobile/.env.local` or as an EAS environment variable; `app.config.js` passes it to the `react-native-maps` plugin. This key is separate from the server's `MAPS_API_KEY`.
 
 ## 1. Start the server (laptop)
 

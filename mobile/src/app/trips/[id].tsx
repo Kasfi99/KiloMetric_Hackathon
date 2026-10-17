@@ -7,6 +7,7 @@ import { Back, Card, Empty, Foot, H1, H2, Icon, KV, P, Screen, Stat } from '@/co
 import { useApp } from '@/lib/app';
 import { dayTime, duration, HAZMAT, num, rp } from '@/lib/format';
 import { C } from '@/lib/theme';
+import type { TripSpecs } from '@/lib/types';
 import { useTripDetail } from '@/lib/useTrip';
 
 export default function TripDetail() {
@@ -16,10 +17,10 @@ export default function TripDetail() {
   const spec = useMemo<MapSpec | null>(() => !h ? null : ({
     routes: h.routing.plan ? [{ coords: h.routing.plan.polyline, selected: true }] : [],
     trail: (trip?.points ?? []).map(p => [p.latitude, p.longitude] as [number, number]),
-    points: [{ at: [h.origin.latitude, h.origin.longitude], kind: 'origin' as const }], fitKey: `history:${h.id}:${trip ? 'd' : ''}`,
+    points: [{ at: [h.origin.latitude, h.origin.longitude], kind: 'origin' as const }, ...(h.routing.plan?.polyline.length ? [{ at: h.routing.plan.polyline.at(-1)!, kind: 'stop' as const }] : [])], fitKey: `history:${h.id}:${trip ? 'd' : ''}`,
   }), [h, trip]);
   if (!h) return <Screen><Back onPress={back} /><Empty title="Trip not found" /></Screen>;
-  const plan = h.routing.plan, mins = h.endedAt ? (Date.parse(h.endedAt) - Date.parse(h.startedAt)) / 60000 : null;
+  const plan = h.routing.plan, sp: Partial<TripSpecs> = h.specs ?? {}, mins =h.endedAt ? (Date.parse(h.endedAt) - Date.parse(h.startedAt)) / 60000 : null;
   return (
     <Screen>
       <Back onPress={back} />
@@ -38,7 +39,7 @@ export default function TripDetail() {
         <Foot>Not an invoice; calculated from historical truck CPK.</Foot>
       </Card>
       {plan && <Card><H2>Selected route</H2><KV k="Provider" v={plan.provider === 'fixture' ? 'sample routes' : 'OpenRouteService'} /><KV k="Route" v={`${num(plan.distanceKm)} km · ${duration(plan.durationMin)}`} /><KV k="Recommendation" v={plan.cost || plan.explanation ? (plan.wasRecommended ? 'Followed' : 'Different route chosen') : 'None'} />{plan.explanation && <Foot>{plan.explanation.headline}</Foot>}{plan.cost && <RouteCostBlock cost={plan.cost} distanceKm={plan.distanceKm} />}{plan.roadCondition !== undefined && <RoadChips road={plan.roadCondition} distanceKm={plan.distanceKm} />}<RestrictionList r={plan.restrictions} /><Foot>Planned estimate at departure. The trip maintenance estimate above uses the odometer distance.</Foot></Card>}
-      <Card><H2>Declaration</H2><KV k="Dimensions" v={`${num(h.specs.heightM)} × ${num(h.specs.widthM)} × ${num(h.specs.lengthM)} m`} /><KV k="Axles" v={num(h.specs.axles, 0)} /><KV k="Gross / maximum" v={`${num(h.specs.grossKg, 0)} / ${num(h.specs.maxGrossKg, 0)} kg`} /><KV k="Hazardous cargo" v={HAZMAT.find(([v]) => v === h.specs.hazmat)?.[1] ?? h.specs.hazmat} /></Card>
+      <Card><H2>Truck and cargo</H2><KV k="Dimensions" v={sp.heightM == null && sp.widthM == null && sp.lengthM == null ? '—' : `${num(sp.heightM)} × ${num(sp.widthM)} × ${num(sp.lengthM)} m`} /><KV k="Axles" v={num(sp.axles, 0)} /><KV k="Cargo weight" v={`${num(sp.loadKg, 0)} kg`} /><KV k="Gross / maximum" v={sp.grossKg == null && sp.maxGrossKg == null ? '—' : `${num(sp.grossKg, 0)} / ${num(sp.maxGrossKg, 0)} kg`} /><KV k="Hazardous cargo" v={HAZMAT.find(([v]) => v === sp.hazmat)?.[1] ?? sp.hazmat ?? '—'} />{h.specsSource === 'missing' && <Foot>Truck specifications were not set at departure, so truck restrictions were not checked.</Foot>}</Card>
     </Screen>
   );
 }

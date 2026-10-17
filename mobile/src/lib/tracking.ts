@@ -37,7 +37,12 @@ export async function requestForeground() {
 
 export async function getFreshPoint(): Promise<LocationPoint> {
   if (!(await requestForeground())) throw new Error('Location permission denied. Allow location for KiloMetric in Settings, then try again.');
-  const l = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+  // getCurrentPositionAsync has no timeout; without a fix (indoors, or a stalled emulator provider) the button spun forever.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const l = await Promise.race([
+    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest }),
+    new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('No GPS fix after 25 seconds. Move to an open area or turn location on, then try again.')), 25000); }),
+  ]).finally(() => clearTimeout(timer));
   const p = toPoint(l);
   if (p.accuracy > MAX_ACCURACY_M) throw new Error(`Accuracy ${Math.round(p.accuracy)} m; ${MAX_ACCURACY_M} m or better is required. Move to an open area and try again.`);
   await writeJson(KEYS.lastFix, p);

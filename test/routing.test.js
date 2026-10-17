@@ -111,8 +111,8 @@ test('routeCosts: maintenance (CPK × km, rough km × admin factor) + fuel → t
  const routes=[{id:'a',distanceKm:40,durationMin:40,roadCondition:{pavedKm:36,roughKm:4,unknownKm:0,steepKm:0,ferryKm:0}},{id:'b',distanceKm:50,durationMin:35,roadCondition:{pavedKm:50,roughKm:0,unknownKm:0,steepKm:0,ferryKm:0}}];
  const fuel={efficiencyKmPerLiter:4,priceIdrPerLiter:6800};
  const withFactor=routeCosts(routes,{cpk:400,fuel,roughRoadFactor:1.5});
- assert.deepEqual(withFactor.routes[0].cost,{maintenanceCost:16800,fuelCost:68000,tollCost:null,totalCost:84800,tripCpk:2120,roughRoadFactor:1.5,factorApplied:true});
- assert.deepEqual(withFactor.routes[1].cost,{maintenanceCost:20000,fuelCost:85000,tollCost:null,totalCost:105000,tripCpk:2100,roughRoadFactor:1.5,factorApplied:false});
+ assert.deepEqual(withFactor.routes[0].cost,{maintenanceCost:16800,fuelCost:68000,tollCost:null,tollIncluded:false,totalCost:84800,tripCpk:2120,roughRoadFactor:1.5,factorApplied:true});
+ assert.deepEqual(withFactor.routes[1].cost,{maintenanceCost:20000,fuelCost:85000,tollCost:null,tollIncluded:false,totalCost:105000,tripCpk:2100,roughRoadFactor:1.5,factorApplied:false});
  assert.deepEqual([withFactor.recommendedId,withFactor.basis],['a','cost'],'cheaper total wins even though b is faster');
  const noFactor=routeCosts(routes,{cpk:400,fuel,roughRoadFactor:null});
  assert.equal(noFactor.routes[0].cost.maintenanceCost,16000);assert.equal(noFactor.routes[0].cost.factorApplied,false);
@@ -197,6 +197,14 @@ test('legRoutes: approach leg to the first stop + main leg alternatives, stitche
  const carOnly=await legRoutes({origin,stops:[dest],specs},{apiKey:'k',lang:'en',fetcher:async u=>u.includes('driving-hgv')?reply({error:{code:2010,message:'Could not find routable point'}},false,404):reply({type:'FeatureCollection',features:[{properties:{summary:{distance:16000,duration:1600},ascent:20,descent:25},geometry:lineFrom(origin,dest)}]})});
  assert.deepEqual(carOnly.routes[0].restrictions.checked,[]);assert.ok(carOnly.routes[0].restrictions.unknown.includes('height'));
  assert.ok(carOnly.routes[0].warnings.some(w=>/general roads/.test(w)));
+ // Observed on a phone (17 Oct): Google Places put Soekarno-Hatta inside the terminal, ORS hgv answered 2009 for the
+ // pickup → airport leg and the whole preview fell back to sample routes. That leg now uses general roads too, and says so.
+ const airport=await legRoutes({origin,stops:[pickup,dest],specs},{apiKey:'k',lang:'en',fetcher:async(u,o)=>{const b=JSON.parse(o.body);
+  if(u.includes('driving-hgv')&&b.coordinates[0][0]===pickup.longitude)return reply({error:{code:2009,message:'Route could not be found'}},false,404);
+  return reply({type:'FeatureCollection',features:[{properties:{summary:{distance:9000,duration:900},ascent:5,descent:5},geometry:b.coordinates[0][0]===origin.longitude?lineFrom(origin,pickup):lineFrom(pickup,dest)}]});}});
+ assert.equal(airport.provider,'ors','real roads, not sample routes');
+ assert.ok(airport.routes[0].warnings.some(w=>/No truck route was found/.test(w)));
+ assert.deepEqual(airport.routes[0].restrictions.checked,[],'nothing claimed as checked on a general-roads leg');
  // Other provider errors are not masked by the car fallback.
  await assert.rejects(()=>legRoutes({origin,stops:[dest],specs},{apiKey:'k',fetcher:async()=>reply({error:{code:2003,message:'bad'}},false,400)}),/HTTP 400/);
  // Single destination: unchanged behaviour (one call).
@@ -208,6 +216,13 @@ test('legRoutes: approach leg to the first stop + main leg alternatives, stitche
 const candidates=[{id:'ors-1',rank:1,distanceKm:152,durationMin:150,ascendM:650,descendM:420,tollIdr:null,restrictions:{checked:['height'],unknown:['truck_bans']},warnings:[]},{id:'ors-2',rank:2,distanceKm:148,durationMin:170,ascendM:500,descendM:380,tollIdr:null,restrictions:{checked:['height'],unknown:['truck_bans']},warnings:[]}];
 const geminiReply=obj=>reply({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(obj)}]}}]});
 const good={recommendedRouteId:'ors-1',summary:'Rute 1 lebih cepat 20 menit.',perRoute:[{routeId:'ors-1',headline:'Tercepat',pros:['20 menit lebih cepat'],cons:['Tanjakan lebih tinggi']},{routeId:'ors-2',headline:'Lebih pendek',pros:['4 km lebih pendek'],cons:['Lebih lambat']}],caveats:['Larangan truk tidak diverifikasi.']};
+
+test('explainRoutes drops caveats that only repeat a route warning (observed: "Route calculated in two parts" shown twice)',async()=>{
+ const twoParts='Route calculated in two parts: your location → first stop, then first stop → destination.';
+ const warned=candidates.map(c=>({...c,warnings:[twoParts]}));
+ const out=await explainRoutes({candidates:warned,specs,stops:[]},{apiKey:'g',model:'m',cache:new Map(),fetcher:async()=>geminiReply({...good,caveats:[` ${twoParts} `,'Larangan truk tidak diverifikasi.']})});
+ assert.deepEqual(out.caveats,['Larangan truk tidak diverifikasi.']);
+});
 
 test('explainRoutes: structured Gemini output validated against candidate ids',async()=>{
  let request;

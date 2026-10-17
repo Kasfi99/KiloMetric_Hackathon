@@ -7,19 +7,36 @@ import { StartSheet } from '@/components/StartSheet';
 import { Back, Badge, Banner, Button, Card, Divider, Empty, Foot, H1, H2, Icon, Loading, P, Screen, Stepbar, s } from '@/components/ui';
 import { api, ApiError } from '@/lib/api';
 import { useApp } from '@/lib/app';
-import { draftStops, gpsFresh, specs } from '@/lib/draft';
+import { draftStops, gpsFresh, isIdentity, specs } from '@/lib/draft';
 import { duration, num } from '@/lib/format';
 import { C } from '@/lib/theme';
 import { getFreshPoint } from '@/lib/tracking';
-import type { Preview, PreviewStop } from '@/lib/types';
+import type { Preview, PreviewStop, StopOrder } from '@/lib/types';
 
 const TIMEOUT_MS = 45000, SLOW_MS = 8000;
+
+function StopSuggestion({ sug, applied, names, hasPickup, onUse, onKeep }: { sug: NonNullable<StopOrder['suggestion']>; applied: number[]; names: string[]; hasPickup: boolean; onUse: () => void; onKeep: () => void }) {
+  const m = sug.minutes, ai = sug.source === 'gemini' && sug.basis === 'notes';
+  // The AI can confirm the current order (e.g. notes forbid the faster one); then there is nothing to switch to.
+  const same = sug.order.join() === applied.join();
+  return (
+    <Card style={ai ? { backgroundColor: C.aiBg } : undefined}>
+      <View style={[s.row, { justifyContent: 'space-between', flexWrap: 'wrap' }]}><H2>{same ? 'Stop order checked' : 'Suggested stop order'}</H2><Badge tone={ai ? 'orange' : 'green'} label={ai ? 'AI read the stop notes' : 'Fastest by Google Maps traffic'} /></View>
+      {hasPickup && <P small style={{ marginTop: 8 }}>Pickup stays first.</P>}
+      {sug.order.map((i, n) => <P key={i} style={{ marginTop: n ? 4 : 8, fontWeight: '700' }}>{n + 1}. {names[i] ?? `Stop ${i + 1}`}</P>)}
+      <P small style={{ marginTop: 8 }}>{sug.reason}</P>
+      {same ? m.fastest != null && m.applied != null && m.fastest < m.applied && <Foot>The fastest order would take about {duration(m.fastest)} instead of {duration(m.applied)} (Google Maps traffic), but the notes require this order.</Foot>
+        : m.applied != null && m.suggested != null && <Foot>About {duration(m.suggested)} vs {duration(m.applied)} in the current order (Google Maps traffic)</Foot>}
+      <View style={{ marginTop: 12, gap: 4 }}>{same ? <Button kind="secondary" title="OK" onPress={onKeep} /> : <><Button title="Use this order" onPress={onUse} /><Button kind="flat" title="Keep current order" onPress={onKeep} /></>}</View>
+    </Card>
+  );
+}
 
 function Found({ stops, hasPickup }: { stops: PreviewStop[]; hasPickup: boolean }) {
   return (
     <Card>
       <H2>Locations found</H2>
-      <Foot>Check that each place is the one you expect. The map provider sometimes picks a different place.</Foot>
+      <Foot>Check that each place is the one you expect. The map provider sometimes picks a different place.{stops.some(st => st.geocodeSource === 'google') ? '\nPlaces found with Google Maps.' : ''}</Foot>
       {stops.map((st, i) => (
         <View key={i} style={{ borderTopWidth: i ? 1 : 0, borderColor: C.border, paddingTop: i ? 10 : 12, marginTop: 10 }}>
           <P small>{hasPickup && i === 0 ? 'Pickup' : `Stop ${hasPickup ? i : i + 1}`} · {st.address}</P>
@@ -40,22 +57,25 @@ export default function Routes() {
   const [index, setIndex] = useState(0), [sheet, setSheet] = useState<'route' | 'none' | null>(null);
   const back = () => (router.canGoBack() ? router.back() : router.replace('/pretrip'));
   const { gps, setGps } = app;
+  // A preview kept in app state may already use a chosen order; keep sending it on retries.
+  const [stopOrder, setStopOrder] = useState<number[] | null>(() => (p?.stopOrder && !isIdentity(p.stopOrder.applied) ? p.stopOrder.applied : null));
+  const [kept, setKept] = useState<string | null>(null);
 
   // Async only: every state update happens after the first await, so the mount effect can call it.
-  const fetchRoutes = useCallback(async () => {
+  const fetchRoutes = useCallback(async (order: number[] | null) => {
     if (!d) return;
     const timer = setTimeout(() => setSlow(true), SLOW_MS);
     try {
       const origin = gpsFresh(gps) ? gps! : await getFreshPoint();
-      const res = await api<Preview>('/api/routes/preview', { method: 'POST', timeoutMs: TIMEOUT_MS, body: { origin, specs: specs(d), lang: 'en', truckId: d.truckId, ...(d.orderId ? { orderId: d.orderId } : { stops: draftStops(d) }) } });
+      const res = await api<Preview>('/api/routes/preview', { method: 'POST', timeoutMs: TIMEOUT_MS, body: { origin, specs: specs(d), lang: 'en', truckId: d.truckId, ...(d.orderId ? { orderId: d.orderId } : { stops: draftStops(d) }), ...(order ? { stopOrder: order } : {}) } });
       setGps(origin); setPreview(res);
       const rec = res.routes.findIndex(r => r.recommended); setIndex(rec >= 0 ? rec : 0);
     } catch (e) { setError({ status: e instanceof ApiError ? e.status : 0, message: (e as Error).message, stops: e instanceof ApiError ? e.body?.stops : undefined }); }
     finally { clearTimeout(timer); setLoading(false); }
   }, [d, gps, setGps, setPreview]);
-  const load = () => { setLoading(true); setSlow(false); setError(null); setPreview(null); fetchRoutes(); };
+  const load = (order: number[] | null = stopOrder) => { setStopOrder(order); setLoading(true); setSlow(false); setError(null); setPreview(null); fetchRoutes(order); };
   const started = useRef(false);
-  useEffect(() => { if (!started.current && !p && d) { started.current = true; fetchRoutes(); } }, [p, d, fetchRoutes]);
+  useEffect(() => { if (!started.current && !p && d) { started.current = true; fetchRoutes(null); } }, [p, d, fetchRoutes]);
 
   const spec = useMemo<MapSpec | null>(() => p && ({
     routes: p.routes.map((r, i) => ({ coords: r.polyline, selected: i === index })), trail: [],
@@ -68,24 +88,29 @@ export default function Routes() {
   if (loading) return <Screen>{head}<Loading label={slow ? 'Still calculating… the free routing provider can be slow.' : 'Calculating routes for your truck…'} /></Screen>;
   if (error) return (
     <Screen header footer={<>
-      {error.status !== 422 && error.status !== 400 && <Button title="Try again" onPress={load} />}
+      {error.status !== 422 && error.status !== 400 && <Button title="Try again" onPress={() => load()} />}
       {error.status === 400 ? <Button title="Back to pre-trip checks" onPress={back} /> : <Button title="Start without a route" kind="secondary" onPress={() => setSheet('none')} />}
+      {stopOrder && <Button kind="flat" title="Back to order as entered" onPress={() => load(null)} />}
     </>}>
       {head}<Banner tone="error">{error.message}</Banner>{error.status === 422 && error.stops && <Found stops={error.stops} hasPickup={!!d.orderId} />}
       <StartSheet visible={sheet === 'none'} onClose={() => setSheet(null)} route={null} />
     </Screen>
   );
-  if (!p) return <Screen>{head}<Empty title="No routes yet" action={<Button title="Calculate routes" onPress={load} />} /></Screen>;
+  if (!p) return <Screen>{head}<Empty title="No routes yet" action={<Button title="Calculate routes" onPress={() => load()} />} /></Screen>;
 
   const routes = p.routes, single = routes.length === 1, x = p.explanation, chosen = routes[index] ?? routes[0];
   // Warnings repeated on every route are shown once as banners; route-specific ones stay on their card.
   const shared = routes[0]?.warnings.filter(w => routes.every(r => r.warnings.includes(w))) ?? [];
+  const so = p.stopOrder, sug = so?.suggestion && kept !== so.suggestion.order.join() ? so.suggestion : null, reordered = !!so && !isIdentity(so.applied);
+  const names = d.orderId ? (app.order(d.orderId)?.stops ?? []).map(st => st.recipient || st.address) : draftStops(d).map(st => st.address);
   return (
     <Screen footer={<Button title={single ? 'Start trip with this route' : `Start trip with Route ${chosen.rank}`} onPress={() => setSheet('route')} />}>
       {head}
       <RouteMap spec={spec} height={260} />
       {p.routing.provider === 'fixture' && <Banner tone="warning">Sample routes: the routing provider is unavailable. Distances and times are not real.</Banner>}
       {shared.map(w => <Banner key={w}>{w}</Banner>)}
+      {reordered && <><Banner>Using the suggested stop order</Banner><Button kind="flat" title="Back to order as entered" onPress={() => load(null)} /></>}
+      {sug && <StopSuggestion sug={sug} applied={so!.applied} names={names} hasPickup={!!d.orderId} onUse={() => load(sug.order)} onKeep={() => setKept(sug.order.join())} />}
       {p.routing.provider === 'ors' && <Found stops={p.stops} hasPickup={!!d.orderId} />}
       {routes.map((r, i) => {
         const own = r.warnings.filter(w => !shared.includes(w)), ai = x.status === 'ok' ? x.perRoute.find(q => q.routeId === r.id) : undefined, on = i === index;
@@ -96,6 +121,7 @@ export default function Routes() {
               <View style={s.row}>{r.rank === 1 && !single && <Badge label="Fastest" />}{r.recommended && <Badge tone="green" label={p.recommendation?.basis === 'cost' ? 'Recommended · lowest cost' : p.recommendation?.basis === 'time' ? 'Recommended · fastest' : 'Only route'} />}</View>
             </View>
             <Text style={{ fontSize: 20, fontWeight: '800', marginTop: 10 }}>{num(r.distanceKm)} <Text style={s.small}>km</Text> / {duration(r.durationMin)}</Text>
+            {r.trafficDurationMin != null && <P small>With current traffic ≈ {duration(r.trafficDurationMin)} (Google Maps)</P>}
             <RouteCostBlock cost={r.cost} distanceKm={r.distanceKm} />
             <RoadChips road={r.roadCondition} distanceKm={r.distanceKm} />
             <P small style={{ marginTop: 8 }}>Ascent ↑ {num(r.ascendM, 0)} m · Descent ↓ {num(r.descendM, 0)} m{r.ascendM == null ? ' · unknown' : ''}</P>

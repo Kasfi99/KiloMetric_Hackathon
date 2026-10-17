@@ -2,10 +2,11 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Linking, Pressable, Text, View } from 'react-native';
 import { StartSheet } from '@/components/StartSheet';
-import { Back, Banner, Button, Card, Check, Empty, Field, Foot, H1, H2, Icon, P, Screen, Segmented, Stat, Stepbar, s } from '@/components/ui';
+import { Back, Banner, Button, Card, Check, Empty, Field, Foot, H1, H2, Icon, KV, P, Screen, Segmented, Sheet, Stat, Stepbar, s } from '@/components/ui';
 import { OdometerPhoto } from '@/components/OdometerPhoto';
-import { parseNum, useApp, type SpecKey } from '@/lib/app';
-import { draftStops, fieldError, gross, LABEL, minFor, problems, selectTruck } from '@/lib/draft';
+import { api } from '@/lib/api';
+import { parseNum, useApp } from '@/lib/app';
+import { draftStops, fieldError, gross, LABEL, master, minFor, overweight, problems, selectTruck } from '@/lib/draft';
 import { HAZMAT, num, rp } from '@/lib/format';
 import { C } from '@/lib/theme';
 import { getFreshPoint } from '@/lib/tracking';
@@ -15,16 +16,17 @@ export default function Pretrip() {
   const [gpsBusy, setGpsBusy] = useState(false);
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [skip, setSkip] = useState(false);
+  const [report, setReport] = useState(false);
+  const [reportedFor, setReportedFor] = useState<string | null>(null);
   const back = () => (router.canGoBack() ? router.back() : router.replace('/'));
   if (!d) return <Screen><Back onPress={back} /><Empty title="Nothing to prepare" sub="Choose an order first." action={<Button title="Open orders" onPress={() => router.replace('/')} />} /></Screen>;
   if (!app.data?.trucks.length) return <Screen><Back onPress={back} /><Empty title="No truck assigned" sub="Contact your admin." /></Screen>;
   const o = app.order(d.orderId), t = app.truck(d.truckId), cpk = app.cpk(d.truckId), issues = problems(app, d, gps);
-  const max = Number(d.specs.maxGrossKg.replace(',', '.')), over = Number.isFinite(max) && gross(d) > max;
-  const set = (key: SpecKey | 'odometer', v: string) => setDraft(key === 'odometer' ? { ...d, odometer: v } : { ...d, specs: { ...d.specs, [key]: v } });
-  const field = (key: SpecKey | 'odometer') => {
-    const min = minFor(app, d, key), raw = key === 'odometer' ? d.odometer : d.specs[key];
-    return <Field key={key} label={LABEL[key]} value={raw} onChangeText={v => set(key, v)} keyboardType="decimal-pad" error={raw === '' ? undefined : fieldError(app, d, key)}
-      hint={key === 'odometer' ? `Minimum ${num(min, 0)} km` : key === 'loadKg' && min > 0 ? `Minimum ${num(min, 0)} kg as specified in the order` : undefined} />;
+  const m = master(app, d), g = gross(app, d), over = overweight(app, d);
+  const field = (key: 'odometer' | 'loadKg') => {
+    const min = minFor(app, d, key), raw = d[key];
+    return <Field key={key} label={LABEL[key]} value={raw} onChangeText={v => setDraft({ ...d, [key]: v })} keyboardType="decimal-pad" error={raw === '' ? undefined : fieldError(app, d, key)}
+      hint={key === 'odometer' ? `Minimum ${num(min, 0)} km` : min > 0 ? `Minimum ${num(min, 0)} kg as specified in the order` : undefined} />;
   };
   const capture = async () => {
     setGpsBusy(true); setGpsError(null);
@@ -57,19 +59,22 @@ export default function Pretrip() {
       </Card>
       <Card>
         <H2>Truck specifications</H2>
-        <Foot>Your declaration, not manufacturer specifications.</Foot>
-        <View style={{ marginTop: 12 }}>
-          <View style={{ flexDirection: 'row', gap: 10 }}>{field('heightM')}{field('widthM')}</View>
-          <View style={{ flexDirection: 'row', gap: 10 }}>{field('lengthM')}{field('axles')}</View>
-          <View style={{ flexDirection: 'row', gap: 10 }}>{field('tareKg')}{field('maxGrossKg')}</View>
+        <P small>Set by your admin</P>
+        <View style={{ marginTop: 10 }}>
+          {m ? <>
+            <KV k="Height" v={`${num(m.heightM)} m`} /><KV k="Width" v={`${num(m.widthM)} m`} /><KV k="Length" v={`${num(m.lengthM)} m`} />
+            <KV k="Axles" v={num(m.axles, 0)} /><KV k="Tare weight" v={`${num(m.tareKg, 0)} kg`} /><KV k="Maximum weight" v={`${num(m.maxGrossKg, 0)} kg`} />
+          </> : <Banner tone="warning">Truck specifications are not set yet. Height, width, length and weight limits will not be checked on the route. Ask your admin to add them.</Banner>}
         </View>
+        {t && (reportedFor === t.id ? <Banner>Sent to your admin.</Banner> : <View style={{ alignItems: 'flex-start' }}><Button kind="flat" icon="report-problem" title="Report a mismatch" onPress={() => setReport(true)} /></View>)}
       </Card>
       <Card>
         <H2 style={{ marginBottom: 12 }}>Cargo</H2>
         {field('loadKg')}
         <Text style={s.label}>Hazardous cargo</Text>
         <Segmented value={d.hazmat} options={HAZMAT} onChange={hazmat => setDraft({ ...d, hazmat })} />
-        <Banner tone={over ? 'error' : 'info'}>Gross weight = {num(gross(d), 0)} kg out of a maximum of {num(Number.isFinite(max) ? max : null, 0)} kg{over ? '\nOver the limit; the server will reject this load.' : ''}</Banner>
+        {m ? <Banner tone={over ? 'error' : 'info'}>Gross weight = {num(g, 0)} kg out of a maximum of {num(m.maxGrossKg, 0)} kg{over ? '\nOver the limit; the server will reject this load.' : ''}</Banner>
+          : <Banner>Gross weight unknown until your admin sets the truck specifications.</Banner>}
       </Card>
       {!o && (
         <Card>
@@ -91,9 +96,36 @@ export default function Pretrip() {
         <P small style={{ marginTop: 8 }}>{gps ? `Location ready · ${gps.latitude.toFixed(5)}, ${gps.longitude.toFixed(5)} · accuracy ${Math.round(gps.accuracy)} m` : gpsError || 'Not captured yet'}</P>
         {gpsError?.includes('permission') && <Button kind="flat" title="Open settings" onPress={() => Linking.openSettings()} />}
       </Card>
-      <Check checked={d.confirmed} onChange={confirmed => setDraft({ ...d, confirmed })}>I confirm the truck specifications and cargo details above are correct for this departure.</Check>
+      <Check checked={d.confirmed} onChange={confirmed => setDraft({ ...d, confirmed })}>I checked that this truck matches the specifications above and the cargo is correct.</Check>
       {!o && draftStops(d).length === 0 && <P small style={{ color: C.muted }}>Add at least one destination.</P>}
       <StartSheet visible={skip} onClose={() => setSkip(false)} route={null} />
+      {t && <SpecReport visible={report} truckId={t.id} plate={t.plate} onClose={() => setReport(false)} onSent={() => { setReport(false); setReportedFor(t.id); }} />}
     </Screen>
+  );
+}
+
+function SpecReport({ visible, truckId, plate, onClose, onSent }: { visible: boolean; truckId: string; plate: string; onClose: () => void; onSent: () => void }) {
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const len = note.trim().length, ok = len >= 5 && len <= 300;
+  const close = () => { setError(null); onClose(); };
+  const send = async () => {
+    setBusy(true); setError(null);
+    try { await api(`/api/trucks/${encodeURIComponent(truckId)}/spec-reports`, { method: 'POST', body: { note: note.trim() } }); setNote(''); onSent(); }
+    catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <Sheet visible={visible} onClose={close}>
+      <H2>Report a mismatch</H2>
+      <P small>Tell your admin what does not match on {plate}. The specifications stay as they are until your admin changes them.</P>
+      <View style={{ marginTop: 12 }}>
+        <Field label="What is different?" value={note} onChangeText={setNote} maxLength={300} multiline placeholder="e.g. Height is 4.2 m after the new box body" style={{ minHeight: 96, paddingTop: 12, textAlignVertical: 'top' }}
+          error={len > 0 && len < 5 ? 'At least 5 characters' : undefined} hint={`${len}/300`} />
+      </View>
+      {error && <Banner tone="error">{error}</Banner>}
+      <Button title="Send" disabled={!ok} loading={busy} onPress={send} />
+      <Button title="Cancel" kind="flat" onPress={close} />
+    </Sheet>
   );
 }

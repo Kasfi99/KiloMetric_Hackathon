@@ -6,13 +6,20 @@ import { RestrictionList, Timeline } from '@/components/domain';
 import { RouteMap, type MapSpec } from '@/components/RouteMap';
 import { Banner, Button, Card, Divider, Empty, Foot, H1, H2, Loading, P, Screen, StatusBadge, s } from '@/components/ui';
 import { useApp } from '@/lib/app';
-import { startDraft } from '@/lib/draft';
+import { inOrder, startDraft } from '@/lib/draft';
 import { duration, num } from '@/lib/format';
 import { KEYS, readJson } from '@/lib/storage';
 import { C } from '@/lib/theme';
 import { isExpoGo } from '@/lib/tracking';
 import { useTripDetail } from '@/lib/useTrip';
-import type { LocationPoint } from '@/lib/types';
+import type { LocationPoint, RoutePlan } from '@/lib/types';
+
+// Google Maps directions take at most 9 waypoints, so long plans open in two parts. No origin: Maps starts from the phone.
+function mapsLinks(points: NonNullable<RoutePlan['stops']>) {
+  const at = (q: { latitude: number; longitude: number }) => `${q.latitude},${q.longitude}`;
+  const url = (pts: typeof points) => `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${at(pts.at(-1)!)}${pts.length > 1 ? `&waypoints=${pts.slice(0, -1).map(at).join('%7C')}` : ''}`;
+  return points.length > 10 ? [url(points.slice(0, 10)), url(points.slice(10))] : [url(points)];
+}
 
 export default function Trip() {
   const app = useApp(), a = app.activeTrip, { trip } = useTripDetail(a?.id);
@@ -43,7 +50,7 @@ export default function Trip() {
       <Button kind="flat" title="Start without an order" onPress={() => { startDraft(app, null); router.push('/pretrip'); }} />
     </Screen>
   );
-  const plan = a.routing.plan, stops = a.deliveryStops ?? [], age = fix ? Math.max(0, Math.round((now - fix.timestamp) / 1000)) : null;
+  const plan = a.routing.plan, stops = inOrder(a.deliveryStops ?? [], plan?.stopOrder), links = plan?.stops?.length ? mapsLinks(plan.stops) : null, age = fix ? Math.max(0, Math.round((now - fix.timestamp) / 1000)) : null;
   const status = app.tracking === 'background' ? 'GPS active · keeps recording with the screen locked' : app.tracking === 'foreground' ? 'GPS active · keep this app open (Expo Go has no background GPS)' : 'GPS stopped';
   return (
     <Screen footer={<Button title="Arrived at destination" onPress={() => router.push('/complete')} />}>
@@ -66,7 +73,8 @@ export default function Trip() {
         {plan && <><Divider /><P small>Planned route: {num(plan.distanceKm)} km · {duration(plan.durationMin)}{plan.wasRecommended ? ' · recommended' : ''}</P><RestrictionList r={plan.restrictions} /></>}
       </Card>
       {stops.length > 0 && <Card><H2>Delivery stops</H2><Timeline stops={stops} detail /></Card>}
-      <Button kind="secondary" icon="map" title="Open in Google Maps" onPress={() => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(a.destination)}&travelmode=driving`)} />
+      {links ? links.map((u, i) => <Button key={u} kind="secondary" icon="map" title={links.length > 1 ? `Open in Google Maps (part ${i + 1})` : 'Open in Google Maps'} onPress={() => Linking.openURL(u)} />)
+        : <Button kind="secondary" icon="map" title="Open in Google Maps" onPress={() => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(a.destination)}&travelmode=driving`)} />}
       <Foot>Official distance comes from the arrival odometer, not GPS.</Foot>
     </Screen>
   );

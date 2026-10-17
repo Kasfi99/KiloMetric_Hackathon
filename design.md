@@ -142,7 +142,9 @@ type Order = {
   createdAt: string; updatedAt: string;
 };
 
-type RoutePlan = { routeId: string; provider: "ors" | "fixture"; distanceKm: number; durationMin: number; polyline: [number, number][]; restrictions: { checked: string[]; unknown: string[] }; explanation: { recommendedRouteId: string | null; headline: string } | null; wasRecommended: boolean; chosenAt: string };
+type RoutePlan = { routeId: string; provider: "ors" | "fixture"; distanceKm: number; durationMin: number; polyline: [number, number][]; restrictions: { checked: string[]; unknown: string[] }; explanation: { recommendedRouteId: string | null; headline: string } | null; wasRecommended: boolean; chosenAt: string;
+  stops?: { address: string; latitude: number; longitude: number }[];   // opsional, 1–11 titik dalam urutan kunjungan (termasuk pickup untuk order)
+  stopOrder?: number[] };                                               // opsional, = stopOrder.applied dari preview (permutasi indeks stop yang dimasukkan, ≤10)
 
 type TripSummary = {
   id: string; driverId: string; driverName: string; truckId: string; plate: string;
@@ -169,6 +171,7 @@ Request:
   truckId?: string;               // truk yang dipakai (harus milik driver, 403 jika bukan); dengan orderId dipakai order.truckId. Sumber CPK untuk biaya rute
   origin: LocationPoint;          // lokasi GPS saat ini, harus fresh (≤120 detik)
   specs: TruckSpecs;
+  stopOrder?: number[];           // urutan kunjungan sebagai indeks stop yang dimasukkan (order: indeks order.stops, pickup selalu pertama dan tidak dihitung). Harus permutasi 0..k-1, selain itu 400 "Stop order must list every stop exactly once.". Default urutan yang dimasukkan
   lang?: "id" | "en" }            // bahasa warnings, pesan error 422/503, dan penjelasan Gemini. Default "id"; nilai lain → "id"
 ```
 
@@ -185,14 +188,16 @@ Response `200`:
     geocodeConfidence: number | null;         // JANGAN dipakai untuk menilai akurasi (terbukti menipu: alamat salah bisa 1.0)
     geocodeLabel: string | null;              // nama tempat yang DITEMUKAN provider — wajib ditampilkan
     geocodePrecision: "exact" | "approximate" | null;  // approximate = hanya ketemu pusat kota/kecamatan, bukan alamat persis
-    geocodeLayer: string | null;              // "venue" | "street" | "address" | "locality" | "county" | ... (info debug)
+    geocodeLayer: string | null;              // ORS: "venue" | "street" | ...; Google: primaryType ("market", "airport", ...) (info debug)
+    geocodeSource?: "google";                 // ada bila ditemukan Google Places (MAPS_API_KEY); tanpa field ini = ORS
   }>;
   routes: Array<{                             // 1–3 rute. Bisa hanya 1 (perjalanan >±70 km, multi-stop, atau provider lambat)
     id: string; rank: number;                 // rank 1 = tercepat
     distanceKm: number; durationMin: number;
     polyline: [number, number][];             // [lat, lng]
     ascendM: number | null; descendM: number | null;
-    tollIdr: null;                            // selalu null dari ORS → tampilkan "Tol: belum diketahui"
+    tollIdr: number | null;                   // Google Maps (e-toll ID_E_TOLL) bila MAPS_API_KEY ada: angka = estimasi tol, 0 = tanpa jalan tol, null = tidak diketahui ("Tol: belum diketahui")
+    trafficDurationMin?: number | null;       // Google Maps, lalu lintas saat ini; null bila rute Google tidak cocok (selisih jarak >10%) dengan rute ORS
     restrictions: { checked: string[]; unknown: string[] };  // live ORS: checked ["height","width","length","weight"] (+ "hazmat" bila muatan berbahaya); unknown ["axleload","hazmat","bridge_limits","truck_bans","time_restrictions"]. Fixture: checked [] dan semua key di unknown
     warnings: string[];                       // kalimat Bahasa Indonesia siap tampil, contoh nyata:
                                               // "Alternatif rute hanya tersedia untuk perjalanan pendek (batas provider ±100 km); satu rute dihitung."
@@ -204,7 +209,8 @@ Response `200`:
     cost: {                                   // estimasi, bukan biaya aktual. null = tidak diketahui → tampilkan "—"
       maintenanceCost: number | null;         // CPK historis truk × km; km jalan rusak × roughRoadFactor bila admin mengisinya
       fuelCost: number | null;                // km / order.costInputs.efficiencyKmPerLiter × priceIdrPerLiter
-      tollCost: null;                         // selalu null (belum ada data tol)
+      tollCost: number | null;                // = tollIdr
+      tollIncluded: boolean;                  // true hanya jika tol SEMUA rute diketahui; baru saat itu tol masuk totalCost/tripCpk
       totalCost: number | null;               // null jika maintenance atau BBM tidak diketahui
       tripCpk: number | null;                 // totalCost / distanceKm
       roughRoadFactor: number | null; factorApplied: boolean };
@@ -217,6 +223,15 @@ Response `200`:
     summary: string;                          // 1–3 kalimat Bahasa Indonesia
     perRoute: Array<{ routeId: string; headline: string; pros: string[]; cons: string[] }>;
     caveats: string[];                        // keterbatasan data; selalu tampilkan
+  };
+  stopOrder: {
+    applied: number[];                        // urutan yang dipakai untuk rute di atas (indeks stop yang dimasukkan)
+    suggestion: null | {                      // null: <2 stop yang bisa diurutkan, tanpa MAPS_API_KEY, rute contoh, gagal, atau sama dengan applied
+      order: number[];                        // usulan urutan, indeks stop yang dimasukkan; kirim sebagai stopOrder untuk menghitung ulang
+      basis: "fastest" | "notes" | "as_entered";  // "notes" = catatan stop (mis. bongkar sebagian) mengalahkan urutan tercepat
+      reason: string;                         // satu kalimat siap tampil dalam `lang`
+      source: "gemini" | "google";            // "google" = tanpa catatan stop, Gemini tidak dipanggil
+      minutes: { applied: number | null; suggested: number | null } };  // menit berkendara Google (lalu lintas saat ini), null = tidak diketahui
   };
 }
 ```
@@ -238,7 +253,7 @@ Label restriksi untuk UI (`src/i18n/id.ts`): height→"Tinggi", width→"Lebar",
   startOdometer: number;                                      // ≥ truck.odometer
   specs: TruckSpecs; specsConfirmed: true; externalRouteConfirmed: true;
   origin: LocationPoint;                                      // fresh
-  routePlan?: RoutePlan;                                      // rute yang dipilih di layar rute; opsional. Boleh membawa cost & roadCondition rute itu
+  routePlan?: RoutePlan;                                      // rute yang dipilih di layar rute; opsional. Boleh membawa cost & roadCondition rute itu, serta stops & stopOrder (urutan kunjungan)
   odometerCheckId?: string; odometerNote?: string }           // hasil POST /api/odometer/read stage "start" (lihat 4.10)
 ```
 `200 { ok: true, tripId: string }`. Error 400 dengan pesan server (truk bukan milik driver, sudah ada trip aktif, muatan melebihi batas, muatan trip < berat order, GPS basi, dsb.).
@@ -250,11 +265,13 @@ Label restriksi untuk UI (`src/i18n/id.ts`): height→"Tinggi", width→"Lebar",
 `{ endOdometer: number; odometerCheckId?: string; odometerNote?: string }` (endOdometer ≥ max(startOdometer, odometer truk saat ini); check dari stage "end"). `200 { ok: true, tripId }`. Setelah sukses, refresh `GET /api/state`.
 
 ### 4.10 `POST /api/odometer/read` — foto odometer (driver)
-Request: `{ stage: "start" | "end"; typedKm: number; image: { mimeType: "image/jpeg" | "image/png" | "image/webp" | "image/heic"; data: string /* base64, ≤ 3 MiB */ } }`. Rate limit 10/menit per user.
+Request: `{ stage: "start" | "end"; typedKm: number; image: { mimeType: "image/jpeg" | "image/png" | "image/webp" | "image/heic"; data: string /* base64, ≤ 3 MiB */ } }`. Rate limit 5/menit per user (lihat catatan rate limit AI di bawah).
 
 Response `200 { checkId, status: "match" | "mismatch" | "unreadable" | "unavailable", ocrKm: number | null, typedKm, unit: "km" | "mi" | "unknown" | null, reason: string | null }`. Gemini hanya membaca angka; backend membandingkan (toleransi ±1 km). Angka ketikan driver tetap odometer resmi.
 
 Aturan: `checkId` sekali pakai, kedaluwarsa 30 menit, dan `typedKm` harus sama dengan odometer yang dikirim saat start/complete (kalau driver mengubah angka, foto ulang). Status `mismatch` / `unreadable` → `odometerNote` wajib ≥5 karakter. `unavailable` (Gemini mati/kuota) tidak memblokir. Tanpa `odometerCheckId`, trip tetap diterima dan dicatat `odometerEvidence.{start|end}.status = "not_provided"`; app mobile mewajibkan foto. Foto disimpan di `<data>/photos/<tripId>-<stage>.<ext>`. Error: 400 (gambar tidak valid), 403 (bukan driver), 429.
+
+**Rate limit AI.** Semua endpoint yang memanggil Gemini (`/api/routes/preview`, `/api/odometer/read`, `/api/orders/extract`, `/api/analyze`) dibatasi 5 panggilan per menit per user per endpoint (`AI_RATE_LIMIT_PER_MINUTE`). Request yang tidak valid juga dihitung. Panggilan ke-6 → `429 { error, retryAfterSeconds }` dengan header `Retry-After`; tampilkan `error` apa adanya.
 
 ### 4.11 `PUT /api/settings` — admin
 `{ roughRoadFactor: number (1–3) | null }` → `200 { settings }`. Faktor pengali CPK untuk km jalan rusak; asumsi yang belum dikalibrasi, `null` = tidak dipakai.

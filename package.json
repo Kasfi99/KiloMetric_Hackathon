@@ -2,6 +2,7 @@
   "name": "kilometric-cpk",
   "version": "1.0.0",
   "private": true,
+  "engines": { "node": ">=20" },
   "type": "module",
   "scripts": {
     "dev": "node server.js",

@@ -99,7 +99,9 @@ export async function handleRequest(req,res){
     const user=sessions.get(req,db.users);
     if(req.method==='GET'&&url.pathname==='/api/session')return json(res,200,{user:user?publicUser(user):null,demoMode});
     if(req.method==='POST'&&url.pathname==='/api/login'){
-      if(!sessions.allowLogin(req.socket?.remoteAddress||'local'))return json(res,429,{error:'Too many login attempts. Try again in a minute.'});
+      // Behind a hosting proxy every socket has the proxy's address; TRUST_PROXY=1 reads the client IP it forwards.
+      const clientIp=(process.env.TRUST_PROXY==='1'&&String(req.headers['x-forwarded-for']||'').split(',')[0].trim())||req.socket?.remoteAddress||'local';
+      if(!sessions.allowLogin(clientIp))return json(res,429,{error:'Too many login attempts. Try again in a minute.'});
       const input=await body(req);
       const account=db.users.find(u=>u.email===String(input.email||'').trim().toLowerCase()&&u.active);
       if(typeof input.password!=='string'||input.password.length>200||!account||!verifyPassword(input.password,account.passwordHash))return json(res,401,{error:'Invalid email or password.'});

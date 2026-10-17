@@ -2,7 +2,7 @@ import React from 'react';
 
 // Minimal Markdown for Gemini's analysis text: headings, rules, two-level lists, **bold**, paragraphs.
 // Builds React elements only (no HTML injection); anything else stays plain text.
-const bold=text=>text.split(/\*\*(.+?)\*\*/).map((part,i)=>i%2?<strong key={i}>{part}</strong>:part);
+export const bold=text=>text.split(/\*\*(.+?)\*\*/).map((part,i)=>i%2?<strong key={i}>{part}</strong>:part);
 const HR=/^\s*([-*_])(\s*\1){2,}\s*$/,HEADING=/^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/,ITEM=/^(\s*)(?:([-*+])|(\d+)[.)])\s+(.*)$/,NOTE=/^\[Analysis cut off by .*\]$/;
 const List=({items,key})=>{const Tag=items[0].ordered?'ol':'ul';return <Tag key={key} start={items[0].ordered&&items[0].n!==1?items[0].n:undefined}>{items.map((it,i)=><li key={i}>{bold(it.text)}{it.children.length>0&&List({items:it.children})}</li>)}</Tag>;};
 

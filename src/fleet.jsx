@@ -9,9 +9,9 @@ const HIGH=1.2;
 const ratio=v=>new Intl.NumberFormat('id-ID',{minimumFractionDigits:1,maximumFractionDigits:2}).format(v)+'×';
 const share=v=>v>0&&v<0.01?'<1%':new Intl.NumberFormat('id-ID',{style:'percent',maximumFractionDigits:0}).format(v);
 const plural=(n,word)=>`${n} ${word}${n===1?'':'s'}`;
-const COST={above:`Above peers (≥ ${ratio(HIGH)})`,unknown:'CPK unknown'};
+const COST={above:`Above similar trucks (≥ ${ratio(HIGH)})`,unknown:'CPK unknown'};
 const SPECS={set:'Set',unset:'Not set',reports:'Open driver reports'};
-const SORT_LABEL={cpk:'CPK · IDR/km',ratio:'vs peers',spend:'Spend',distance:'Distance tracked',odometer:'Odometer'};
+const SORT_LABEL={cpk:'CPK · IDR/km',ratio:'vs similar trucks',spend:'Spend',distance:'Distance tracked',odometer:'Odometer'};
 
 // Peer CPK is a ratio (total spend ÷ total distance) of the other trucks with the same model and profile that have distance.
 // With no such peer the truck is compared with the fleet CPK instead, and the label says so.
@@ -67,7 +67,7 @@ export function FleetPage({data,onEdit,onDelete,onLog,onSpecs}){
   <tbody>{visible.map(({t,record,cmp,reports})=>{const high=cmp.ratio!==null&&cmp.ratio>=HIGH;return <tr key={t.id} className={'fleet-row'+(high?' row-high':'')} onClick={()=>setSelectedId(t.id)}>
    <td><button type="button" className="row-open" data-truck-id={t.id} aria-haspopup="dialog" aria-label={`Open details for ${t.plate}`} onClick={e=>{e.stopPropagation();setSelectedId(t.id);}}><span className="entity-icon"><Truck size={18}/></span><span><strong>{t.plate}</strong><small>{t.model}</small></span></button></td>
    <td>{t.cpk==null?<><strong>—</strong><small>CPK unknown · no distance tracked yet</small></>:<strong>{cpk(t.cpk)}</strong>}</td>
-   <td>{cmp.ratio===null?'—':<span className={high?'ratio high':'ratio'}>{ratio(cmp.ratio)} {cmp.scope}</span>}{cmp.ratio!==null&&<small>{cmp.scope==='peers'?`${plural(cmp.count,'peer')} · ${cpk(cmp.cpk)} IDR/km`:`No peer with distance · fleet ${cpk(cmp.cpk)} IDR/km`}</small>}</td>
+   <td>{cmp.ratio===null?'—':<span className={high?'ratio high':'ratio'}>{ratio(cmp.ratio)}</span>}{cmp.ratio!==null&&<small>{cmp.scope==='peers'?`${plural(cmp.count,'similar truck')} · ${cpk(cmp.cpk)} IDR/km`:`No similar truck · vs fleet ${cpk(cmp.cpk)} IDR/km`}</small>}</td>
    <td>{t.visits?money(t.spend):'—'}<small>{t.visits?plural(t.visits,'visit'):'No workshop visits'}</small></td>
    <td>{number(t.distance)} km<small>Since {date(t.baselineDate)}</small></td>
    <td>{number(t.odometer)} km</td>
@@ -79,7 +79,7 @@ export function FleetPage({data,onEdit,onDelete,onLog,onSpecs}){
   </div>
   {sorted.length>0&&<div className="pager"><span>Showing {start+1}–{start+visible.length} of {sorted.length}</span><label className="page-size">Rows per page<select value={size} onChange={e=>{setSize(Number(e.target.value));setPage(1);}}>{[10,25,50].map(n=><option key={n} value={n}>{n}</option>)}</select></label>
    <nav aria-label="Fleet register pages"><button type="button" className="page-button" aria-label="Previous page" disabled={current===1} onClick={()=>setPage(current-1)}><ChevronLeft size={15}/></button>{pageList(pages,current).map(p=>typeof p==='string'?<span key={p} className="page-gap">…</span>:<button type="button" key={p} className={'page-button'+(p===current?' current':'')} aria-label={`Page ${p}`} aria-current={p===current?'page':undefined} onClick={()=>setPage(p)}>{p}</button>)}<button type="button" className="page-button" aria-label="Next page" disabled={current===pages} onClick={()=>setPage(current+1)}><ChevronRight size={15}/></button></nav></div>}
-  <div className="section-foot">Sorted by {SORT_LABEL[sort.key]}, {sort.dir==='desc'?'highest':'lowest'} first; unknown values last. Peer CPK = total spend ÷ total distance of other trucks with the same model and operating profile. Highlighted rows are at least {ratio(HIGH)} their comparison.</div>
+  <div className="section-foot">Sorted by {SORT_LABEL[sort.key]}, {sort.dir==='desc'?'highest':'lowest'} first; unknown values last. Similar trucks = other trucks with the same model and operating profile; their CPK = total spend ÷ total distance. Highlighted rows are at least {ratio(HIGH)} their comparison.</div>
   {selected&&<TruckPanel row={selected} data={data} onClose={closePanel} onEdit={()=>onEdit(selected.t)} onDelete={()=>onDelete(selected.t)} onLog={()=>onLog(selected.t.id)} onSpecs={()=>onSpecs(selected.t.id)}/>}
  </section>;
 }
@@ -98,13 +98,13 @@ function TruckPanel({row,data,onClose,onEdit,onDelete,onLog,onSpecs}){
  const top=records.slice().sort((x,y)=>eventCost(y)-eventCost(x)||y.date.localeCompare(x.date)).slice(0,5);
  const active=data.analytics.cycles.filter(c=>c.truckId===t.id&&c.status==='active').sort((x,y)=>x.category.localeCompare(y.category)||x.position.localeCompare(y.position));
  const partName=id=>{const p=data.parts.find(p=>p.id===id);return p?`${p.brand} · ${p.name}`:'Part not in catalog';};
- const peerText=cmp.scope==='peers'?`Peer CPK ${cpk(cmp.cpk)} IDR/km · ${plural(cmp.count,'other truck')} on ${t.model} · ${t.duty}`:cmp.cpk==null?`No other ${t.model} · ${t.duty} truck with distance, and fleet CPK is unknown`:`Fleet CPK ${cpk(cmp.cpk)} IDR/km · no other ${t.model} · ${t.duty} truck with distance`;
+ const peerText=cmp.scope==='peers'?`Similar trucks: ${cpk(cmp.cpk)} IDR/km · ${plural(cmp.count,'other truck')} on ${t.model} · ${t.duty}`:cmp.cpk==null?`No other ${t.model} · ${t.duty} truck with distance, and fleet CPK is unknown`:`Fleet CPK ${cpk(cmp.cpk)} IDR/km · no other ${t.model} · ${t.duty} truck with distance`;
  return <div className="truck-panel-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}><aside ref={panel} className="truck-panel" role="dialog" aria-modal="true" aria-labelledby="truck-panel-title">
   <div className="modal-header"><div><span className="eyebrow">TRUCK DETAIL</span><h2 id="truck-panel-title">{t.plate}</h2><small>{t.model} · {t.duty}</small></div><button type="button" className="icon-button panel-close" aria-label="Close truck details" onClick={onClose}><X size={22}/></button></div>
   <div className="truck-panel-body">
    <dl className="panel-summary">
     <div><dt>Maintenance CPK</dt><dd>{t.cpk==null?'unknown':<>{cpk(t.cpk)} <span>IDR/km</span></>}</dd>{t.cpk==null&&<small>No distance tracked yet</small>}</div>
-    <div><dt>vs {cmp.scope}</dt><dd className={cmp.ratio!==null&&cmp.ratio>=HIGH?'ratio high':''}>{cmp.ratio===null?'—':ratio(cmp.ratio)}</dd><small>{peerText}</small></div>
+    <div><dt>{cmp.scope==='peers'?'vs similar trucks':'vs fleet'}</dt><dd className={cmp.ratio!==null&&cmp.ratio>=HIGH?'ratio high':''}>{cmp.ratio===null?'—':ratio(cmp.ratio)}</dd><small>{peerText}</small></div>
     <div><dt>Maintenance spend</dt><dd>{records.length?money(spend):'—'}</dd><small>{plural(records.length,'workshop visit')}</small></div>
     <div><dt>Distance tracked</dt><dd>{number(t.distance)} <span>km</span></dd><small>Since {date(t.baselineDate)} · odometer {number(t.odometer)} km</small></div>
    </dl>

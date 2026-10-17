@@ -16,7 +16,7 @@ Logistics operators do not know what each truck actually costs to keep running p
 2. **Truck & fleet CPK** = recorded maintenance cost / tracked odometer km. Fleet = total cost / total km (ratio, not mean).
 3. **Spare-part lifecycle.** Install opens a cycle; next install on same truck+category+position closes it → part CPK = cycle cost / km lived. Catalog view + **Mix optimizer** rank brands per model/profile/category/position cohort.
 4. **Delivery orders.** Admin uploads surat jalan (PDF/image) → Gemini OCR extracts draft orders (multi-stop) → admin reviews, assigns driver+truck → Google Routes gives distance/ETA/toll → backend projects maintenance + fuel + toll cost and estimated trip CPK.
-5. **Driver trips (PWA).** Driver declares truck specs/load, confirms externally-approved route, streams foreground GPS, enters arrival odometer → truck mileage and CPK update; order moves assigned → in transit → completed.
+5. **Driver trips (PWA).** Truck dimensions/axles/tare/max weight are master data set by admin or workshop (`PUT /api/trucks/:id/specifications`); the driver only declares cargo weight and hazmat, can report a mismatch, and trips never overwrite the master (missing specs → truck restrictions unchecked, warned). Driver confirms externally-approved route, streams foreground GPS, enters arrival odometer → truck mileage and CPK update; order moves assigned → in transit → completed.
 6. **Gemini maintenance analyst** (optional) explains the numbers and data gaps; never computes them.
 7. **Driver route alternatives.** `POST /api/routes/preview` geocodes stops and gets 1–3 truck-profile routes from OpenRouteService (`driving-hgv`), then Gemini explains them as validated JSON. Each route gets `roadCondition` (ORS surface/waytype/steepness) and `cost` (truck CPK × km, with an optional admin rough-road factor on rough km, plus fuel from the order; toll unknown). The backend picks the recommended route (lowest total cost, else fastest); Gemini only explains that pick. The chosen route is snapshotted on the trip (`trip.routing.plan`).
 7b. **Odometer photo evidence.** At departure and arrival the driver photographs the odometer; `POST /api/odometer/read` has Gemini read it and the backend compares it with the typed value. Mismatch/unreadable needs a driver reason; the typed value stays official. Stored on `trip.odometerEvidence`.
@@ -27,7 +27,7 @@ Logistics operators do not know what each truck actually costs to keep running p
 
 - Managers see which trucks cost most and *which records* make up that number.
 - Workshop compares brands on like-for-like cohorts with evidence (sample counts visible).
-- Drivers start trips with explicit truck, origin GPS, specs and load.
+- Drivers start trips with explicit truck, origin GPS and load; truck specs come from the admin-maintained master.
 - Dispatchers get per-trip cost estimates with maintenance / fuel / toll kept separate.
 - Drivers pick a truck-aware fastest route (tolls allowed) on their phone, with an AI explanation, before departure. Restriction coverage is partial (see Current status).
 

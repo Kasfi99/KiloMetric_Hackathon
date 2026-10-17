@@ -177,12 +177,14 @@ Demo credentials are public. Keep this mode local. For a fresh non-demo database
 
 1. Sign in as a driver and select an assigned truck.
 2. Capture a fresh phone location (permission required, accuracy within 100 meters).
-3. Enter destination, departure odometer, overall height/width/length, axle count, empty weight, permitted gross weight, cargo weight, and hazardous-goods classification. Confirm the declaration for each departure. These are driver declarations, not verified manufacturer limits.
+3. Enter destination, departure odometer, cargo weight, and hazardous-goods classification. The truck's height, width, length, axle count, empty weight and permitted gross weight are shown read-only from the truck master. The driver confirms that the truck matches them for each departure.
 4. Because routing is not connected, confirm dispatcher approval of an externally planned route. The app does not currently supply navigation.
 5. Start trip recording, then tap **Resume live GPS**. The phone streams location updates while the app is visible and online.
 6. At arrival, enter the vehicle odometer and complete the trip. This updates truck mileage, active part distance, and actual maintenance CPK. GPS distance is approximate and kept separate.
 
 Each driver/truck can have only one active trip. Drivers cannot start trips for unassigned trucks or modify other drivers' trips. Over-declared weight, stale/inaccurate GPS, and implausible GPS movement are rejected. Duplicate GPS samples do not count twice. All writes are serialized and persisted locally. Up to the most recent 10,000 location points are retained per trip; approximate GPS distance is cumulative. Only the most recent location is included in polling summaries.
+
+**Truck specifications are master data.** Admin or workshop set them per truck in **Fleet & trucks → View specs** (`PUT /api/trucks/:id/specifications`; managers can only read them). Route previews and trips read only `loadKg` and `hazmat` from the driver and take every other value from the truck, so a trip never changes the truck master. If a truck has no specifications, the trip still starts: dimensions and gross weight stay unknown (`trip.specsSource: "missing"`), ORS routes without truck restrictions (`restrictions.checked` is empty), and every route shows a warning. Drivers can report a mismatch (`POST /api/trucks/:id/spec-reports`). Reports appear with the note, driver and date on the truck's specifications panel and are marked resolved when the specifications are saved. Drivers never receive reports.
 
 Completed trip maintenance estimate is **historical truck maintenance CPK at departure × completed odometer distance**. It is an estimate, not a new maintenance charge. It excludes fuel, tolls, and terrain adjustment. Recorded maintenance expenses remain the source of actual CPK.
 

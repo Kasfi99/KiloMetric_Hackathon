@@ -95,10 +95,15 @@ Tipe dasar:
 ```ts
 type LocationPoint = { latitude: number; longitude: number; accuracy: number; timestamp: number }; // accuracy meter 0–100, timestamp epoch ms
 type Hazmat = "none" | "flammable" | "explosive" | "other";
-type TruckSpecs = { heightM: number; widthM: number; lengthM: number; axles: number; tareKg: number; maxGrossKg: number; loadKg: number; hazmat: Hazmat; grossKg?: number };
+// Master truk, diisi admin/workshop (bukan driver). null = belum diisi.
+type TruckMasterSpecs = { heightM: number; widthM: number; lengthM: number; axles: number; tareKg: number; maxGrossKg: number };
+// Yang dikirim driver di preview dan start trip. Field lain diabaikan server.
+type DriverSpecsInput = { loadKg: number; hazmat: Hazmat };
+// Disimpan di trip: dimensi dari master truk saat keberangkatan; semua null bila master belum diisi.
+type TripSpecs = { heightM: number | null; widthM: number | null; lengthM: number | null; axles: number | null; tareKg: number | null; maxGrossKg: number | null; loadKg: number; hazmat: Hazmat; grossKg: number | null };
 ```
 
-Batas validasi server (tampilkan sebagai hint di form): heightM 0.5–10, widthM 0.5–10, lengthM 1–50, axles 2–20 (bilangan bulat), tareKg 500–200000, maxGrossKg 500–250000, loadKg 0–200000; `tareKg + loadKg` harus ≤ `maxGrossKg` (server menolak jika lebih). GPS: accuracy ≤ 100 m, timestamp tidak lebih tua dari 120 detik saat dipakai sebagai titik awal.
+Batas validasi server: master heightM 0.5–10, widthM 0.5–10, lengthM 1–50, axles 2–20 (bilangan bulat), tareKg 500–200000, maxGrossKg 500–250000 dan maxGrossKg > tareKg. Driver: loadKg 0–200000. Bila master diketahui, `tareKg + loadKg` harus ≤ `maxGrossKg` (server menolak jika lebih); bila master belum diisi, berat total tidak diketahui dan trip tetap boleh dimulai. GPS: accuracy ≤ 100 m, timestamp tidak lebih tua dari 120 detik saat dipakai sebagai titik awal.
 
 ### 4.1 `GET /api/session`
 `200 { user: User | null, demoMode: boolean }`
@@ -128,7 +133,8 @@ type State = {
   [k: string]: unknown;           // field lain ada (parts, maintenance, ai, gemini, revision) — abaikan
 };
 
-type Truck = { id: string; plate: string; model: string; duty: string; odometer: number; baselineOdometer: number; baselineDate: string; reportedOdometer?: number; trackingMode?: "manual"|"workshop"; specifications?: TruckSpecs; [k: string]: unknown };
+type Truck = { id: string; plate: string; model: string; duty: string; odometer: number; baselineOdometer: number; baselineDate: string; reportedOdometer?: number; trackingMode?: "manual"|"workshop"; specifications?: TruckMasterSpecs | null; [k: string]: unknown };
+// specReports (laporan ketidaksesuaian dari driver) hanya dikirim ke admin, manager, dan workshop; driver tidak menerimanya.
 
 type OrderStop = { recipient: string; address: string; contact: string; notes: string };
 type Order = {
@@ -148,7 +154,7 @@ type RoutePlan = { routeId: string; provider: "ors" | "fixture"; distanceKm: num
 
 type TripSummary = {
   id: string; driverId: string; driverName: string; truckId: string; plate: string;
-  origin: LocationPoint; destination: string; specs: TruckSpecs; startOdometer: number; startedAt: string;
+  origin: LocationPoint; destination: string; specs: TripSpecs; specsSource?: "truck" | "missing"; startOdometer: number; startedAt: string;   // specsSource tidak ada pada trip lama (sebelum 17 Okt 2026)
   status: "active" | "completed";
   routing: { status: "not_connected" | "planned"; priority: "fastest"; tollsAllowed: true; externalRouteConfirmed: true; provider?: string; plan?: RoutePlan; [k: string]: unknown };
   lastLocation: LocationPoint; pointCount: number; gpsDistanceKm: number;
@@ -168,9 +174,9 @@ Request:
 ```ts
 { orderId?: string;              // jika ada: stops diambil dari order (harus milik driver). stops[0] = pickupAddress order, lalu stop order berurutan
   stops?: { address: string }[];  // jika tanpa orderId: 1–10 alamat tujuan berurutan
-  truckId?: string;               // truk yang dipakai (harus milik driver, 403 jika bukan); dengan orderId dipakai order.truckId. Sumber CPK untuk biaya rute
+  truckId?: string;               // truk yang dipakai (harus milik driver, 403 jika bukan); dengan orderId dipakai order.truckId. Sumber CPK untuk biaya rute dan spesifikasi master. Tanpa truk → diperlakukan seperti spesifikasi belum diisi
   origin: LocationPoint;          // lokasi GPS saat ini, harus fresh (≤120 detik)
-  specs: TruckSpecs;
+  specs: DriverSpecsInput;        // hanya loadKg dan hazmat yang dibaca; dimensi dan berat diambil server dari truck.specifications
   stopOrder?: number[];           // urutan kunjungan sebagai indeks stop yang dimasukkan (order: indeks order.stops, pickup selalu pertama dan tidak dihitung). Harus permutasi 0..k-1, selain itu 400 "Stop order must list every stop exactly once.". Default urutan yang dimasukkan
   lang?: "id" | "en" }            // bahasa warnings, pesan error 422/503, dan penjelasan Gemini. Default "id"; nilai lain → "id"
 ```
@@ -198,11 +204,14 @@ Response `200`:
     ascendM: number | null; descendM: number | null;
     tollIdr: number | null;                   // Google Maps (e-toll ID_E_TOLL) bila MAPS_API_KEY ada: angka = estimasi tol, 0 = tanpa jalan tol, null = tidak diketahui ("Tol: belum diketahui")
     trafficDurationMin?: number | null;       // Google Maps, lalu lintas saat ini; null bila rute Google tidak cocok (selisih jarak >10%) dengan rute ORS
-    restrictions: { checked: string[]; unknown: string[] };  // live ORS: checked ["height","width","length","weight"] (+ "hazmat" bila muatan berbahaya); unknown ["axleload","hazmat","bridge_limits","truck_bans","time_restrictions"]. Fixture: checked [] dan semua key di unknown
+    restrictions: { checked: string[]; unknown: string[] };  // live ORS: checked ["height","width","length","weight"] (+ "hazmat" bila muatan berbahaya); unknown ["axleload","hazmat","bridge_limits","truck_bans","time_restrictions"]. Fixture, atau truk tanpa spesifikasi master: checked [] dan semua key di unknown (ORS tetap profil driving-hgv tanpa restriksi)
     warnings: string[];                       // kalimat Bahasa Indonesia siap tampil, contoh nyata:
                                               // "Alternatif rute hanya tersedia untuk perjalanan pendek (batas provider ±100 km); satu rute dihitung."
                                               // "Stop 1 (Jl. Asia Afrika No. 8, Bandung) hanya ditemukan sebagai "Bandung, JR, Indonesia" — titik perkiraan, bukan alamat persis. ..."
                                               // "Rute contoh (Via tol (contoh)) — provider rute tidak tersedia. ..."
+                                              // Truk tanpa spesifikasi master: kalimat pertama di SETIAP rute (kalimat jadi, bukan key):
+                                              // id "Spesifikasi truk belum diisi admin; batas tinggi, lebar, panjang, dan berat tidak dicek."
+                                              // en "Truck specifications are not set by your admin yet; height, width, length and weight limits were not checked."
     recommended: boolean;                     // true pada tepat satu rute; dipilih backend (deterministik), bukan oleh Gemini
     roadCondition: {                          // dari ORS extra_info (surface/waytype/steepness); null untuk rute contoh (fixture)
       pavedKm: number; roughKm: number; unknownKm: number; steepKm: number; ferryKm: number } | null;
@@ -251,12 +260,12 @@ Label restriksi untuk UI (`src/i18n/id.ts`): height→"Tinggi", width→"Lebar",
 ```ts
 { truckId: string; orderId?: string; destination: string;   // jika orderId ada, destination = alamat stop terakhir order
   startOdometer: number;                                      // ≥ truck.odometer
-  specs: TruckSpecs; specsConfirmed: true; externalRouteConfirmed: true;
+  specs: DriverSpecsInput; specsConfirmed: true; externalRouteConfirmed: true;   // dimensi dari klien diabaikan; trip.specs dibangun dari master truk, trip.specsSource = "truck" | "missing"
   origin: LocationPoint;                                      // fresh
   routePlan?: RoutePlan;                                      // rute yang dipilih di layar rute; opsional. Boleh membawa cost & roadCondition rute itu, serta stops & stopOrder (urutan kunjungan)
   odometerCheckId?: string; odometerNote?: string }           // hasil POST /api/odometer/read stage "start" (lihat 4.10)
 ```
-`200 { ok: true, tripId: string }`. Error 400 dengan pesan server (truk bukan milik driver, sudah ada trip aktif, muatan melebihi batas, muatan trip < berat order, GPS basi, dsb.).
+`200 { ok: true, tripId: string }`. Error 400 dengan pesan server (truk bukan milik driver, sudah ada trip aktif, muatan melebihi batas master, muatan trip < berat order, GPS basi, dsb.). Trip tidak pernah mengubah `truck.specifications`.
 
 ### 4.8 `POST /api/trips/:id/locations` — kirim titik GPS
 `{ points: LocationPoint[] }` 1–50 titik, timestamp naik. `200 { ok: true, accepted: number }`. Titik dengan timestamp ≤ titik terakhir server diabaikan diam-diam (bukan error). Error 400 jika lompatan >160 km/jam atau titik mendahului trip → buang batch itu dari antrean lokal dan log, jangan retry selamanya.
@@ -275,6 +284,12 @@ Aturan: `checkId` sekali pakai, kedaluwarsa 30 menit, dan `typedKm` harus sama d
 
 ### 4.11 `PUT /api/settings` — admin
 `{ roughRoadFactor: number (1–3) | null }` → `200 { settings }`. Faktor pengali CPK untuk km jalan rusak; asumsi yang belum dikalibrasi, `null` = tidak dipakai.
+
+### 4.12 `PUT /api/trucks/:id/specifications` — admin, workshop
+Body: keenam field `TruckMasterSpecs` (boleh juga `{ specifications: TruckMasterSpecs }`), atau `{ specifications: null }` untuk mengosongkan. `200 { truck }`. 400 bila di luar batas §4, axles bukan bilangan bulat, atau maxGrossKg ≤ tareKg. 403 untuk manager/driver, 404 bila truk tidak ada. Setiap simpan (termasuk mengosongkan) menandai semua laporan terbuka truk itu selesai (`resolvedAt`, `resolvedBy`).
+
+### 4.13 `POST /api/trucks/:id/spec-reports` — driver yang ditugaskan ke truk
+Body `{ note: string }` (5–300 karakter setelah trim) → `200 { ok: true }`. 403 bila bukan driver yang ditugaskan, 400 bila catatan terlalu pendek/panjang. Laporan berikutnya dari driver yang sama ditambahkan (bukan error). Disimpan sebagai `truck.specReports[] = { id, at, driverId, driverName, note, resolvedAt: null, resolvedBy: null }` (100 terakhir per truk), terlihat oleh admin/manager/workshop di `/api/state`, tidak pernah dikirim ke driver.
 
 ---
 
@@ -347,10 +362,10 @@ Form satu halaman scroll, dibagi kartu. Draft disimpan di `TripDraftContext` dan
 1. **Kartu Order** (jika `orderId`): ringkas reference, tujuan akhir, berat order. Tidak bisa diedit.
 2. **Kartu Truk**: picker dari `state.trucks` (hanya truk assigned). Jika `orderId` → truk otomatis `order.truckId` dan picker dikunci dengan catatan "Truk ditentukan oleh order". Tampilkan plate, model, odometer saat ini, CPK dari `analytics.trucks` (`Rp {cpk}/km` atau `—`).
 3. **Kartu Odometer keberangkatan**: input numerik, prefill `truck.odometer`, hint "Minimal {truck.odometer} km". Validasi lokal ≥ truck.odometer.
-4. **Kartu Spesifikasi truk**: prefill dari `truck.specifications` jika ada. Input: Tinggi (m), Lebar (m), Panjang (m), Jumlah as (integer), Berat kosong (kg), Berat maksimum diizinkan (kg). Hint batas §4. Catatan: "Ini deklarasi Anda, bukan data pabrikan."
+4. **Kartu Spesifikasi truk** (hanya baca): tampilkan `truck.specifications` dengan caption "Diisi oleh admin". Bila `null`: banner peringatan bahwa batas tinggi, lebar, panjang, dan berat tidak dicek; trip tetap bisa dimulai. Tombol "Laporkan ketidaksesuaian" membuka sheet catatan → `POST /api/trucks/:id/spec-reports` (§4.13).
 5. **Kartu Muatan**: Berat muatan (kg) — prefill `order.cargoWeightKg` jika ada; hint "Minimal {cargoWeightKg} kg sesuai order" bila order punya berat. Hazmat: segmented control 4 opsi: Tidak ada / Mudah terbakar / Mudah meledak / Lainnya. Baris hitung otomatis (tampilan saja): "Berat total = {tare + load} kg dari maksimum {maxGross} kg" — merah + teks "Melebihi batas; server akan menolak" jika lebih.
 6. **Kartu Lokasi awal**: tombol "Ambil lokasi GPS". Status: belum diambil / mengambil… / berhasil (lat,lng, akurasi m, "x detik lalu") / gagal (alasan: izin ditolak → tombol "Buka pengaturan"; akurasi > 100 m → "Akurasi {n} m, butuh ≤ 100 m. Coba di tempat terbuka."; basi > 120 detik → otomatis minta ulang saat lanjut).
-7. **Checkbox** "Saya mengonfirmasi spesifikasi truk dan muatan di atas benar untuk keberangkatan ini." → `specsConfirmed`.
+7. **Checkbox** "Saya sudah memeriksa truk sesuai spesifikasi di atas, dan muatan benar untuk keberangkatan ini." → `specsConfirmed`.
 8. **Tujuan** (hanya jika tanpa order): input alamat tujuan 1–10 baris (tambah/hapus), minimal 1.
 9. Tombol primer sticky "Lihat alternatif rute" → aktif jika semua valid + GPS fresh → `/trip/route`. Tombol sekunder "Lewati rute, langsung mulai" → ke bottom sheet mulai (§6.6 langkah konfirmasi) tanpa `routePlan`.
 

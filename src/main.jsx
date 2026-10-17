@@ -6,10 +6,10 @@ import './driver.css';
 import {OrdersPage} from './orders.jsx';
 import {Markdown,bold} from './markdown.jsx';
 import {previewWorkshopVisit} from '../lib/workshop.js';
-import {summarizePartCycles} from '../lib/analytics.js';
 import {api as request,Login,TripsPage,UsersPage,IntegrationSettings} from './driver.jsx';
 import {TruckSpecsPanel} from './truck-specs.jsx';
 import {FleetPage} from './fleet.jsx';
+import {PartsPage} from './parts.jsx';
 import {money,number,cpk,date} from './format.js';
 
 const nav=[['overview','Overview',LayoutDashboard],['trucks','Fleet & trucks',Truck],['parts','Spare parts',Package],['maintenance','Maintenance',Wrench],['optimizer','Mix optimizer',Layers],['ai','Gemini insights',Sparkles],['trips','Trips & GPS',Route],['orders','Delivery orders',Package],['users','People & access',Layers]];
@@ -54,7 +54,7 @@ export function App({initialData=null,initialPage='maintenance',onLogout=()=>{}}
   </>}
   {page==='trucks'&&<FleetPage data={data} onEdit={t=>open('trucks',t)} onDelete={t=>setModal({type:'delete',entity:'trucks',record:t})} onLog={truckId=>setModal({type:'maintenance',truckId})} onSpecs={setSpecTruckId}/>}
   {page==='trucks'&&data.trucks.some(t=>t.id===specTruckId)&&<TruckSpecsPanel truck={data.trucks.find(t=>t.id===specTruckId)} role={role} reload={load} notify={notify} onClose={()=>setSpecTruckId(null)}/>}
-  {page==='parts'&&<PartsCatalog data={data} query={query} setQuery={setQuery} matches={matches} onEdit={p=>open('parts',p)} onDelete={p=>setModal({type:'delete',entity:'parts',record:p})}/>}
+  {page==='parts'&&<PartsPage data={data} onEdit={p=>open('parts',p)} onDelete={p=>setModal({type:'delete',entity:'parts',record:p})} onCompare={permissions.includes('optimizer')?()=>go('optimizer'):null}/>}
   {page==='maintenance'&&<><section className="card workshop-intro"><div><span className="eyebrow">START WITH THE WORKSHOP VISIT</span><h2>A single entry keeps everything in sync.</h2><p>Choose a truck or register one here, enter its odometer, and record the work and costs.</p></div><div className="workshop-flow"><span><Truck size={17}/>1. Identify truck</span><ArrowRight size={14}/><span><Wrench size={17}/>2. Enter service</span><ArrowRight size={14}/><span><Route size={17}/>3. CPK updates</span></div></section><section className="card"><TableHeader title="Maintenance history" count={data.maintenance.length} query={query} setQuery={setQuery} placeholder="Search truck, workshop, or notes…"/><MaintenanceTable records={data.maintenance.filter(m=>matches({...m,truck:data.trucks.find(t=>t.id===m.truckId)?.plate})).sort((a,b)=>b.date.localeCompare(a.date))} data={data} onEdit={r=>open('maintenance',r)} onDelete={r=>setModal({type:'delete',entity:'maintenance',record:r})}/></section></>}
   {page==='optimizer'&&<Optimizer data={data}/>}
   {page==='ai'&&<AI data={data} reload={load} notify={notify}/>}
@@ -66,26 +66,6 @@ export function App({initialData=null,initialPage='maintenance',onLogout=()=>{}}
   </main></div>{toast&&<div className="toast" role="status"><CheckCircle2 size={18}/>{toast}</div>}
   {modal&&<RecordModal modal={modal} data={data} onClose={()=>setModal(null)} save={save} remove={remove}/>}
  </div>;
-}
-export function PartsCatalog({data,query,setQuery,matches,onEdit,onDelete,initialSelectedId=null}){
- const [model,setModel]=useState(''),[selectedId,setSelectedId]=useState(initialSelectedId);
- useEffect(()=>{if(selectedId)document.getElementById('part-lifecycle-history')?.scrollIntoView({behavior:'smooth',block:'start'});},[selectedId]);
- const models=[...new Set(data.trucks.map(t=>t.model))];
- const selected=data.parts.find(p=>p.id===selectedId);
- const summary=selected?summarizePartCycles(data.analytics.cycles,selected.id,model):null;
- return <>
- <section className="card"><TableHeader title="Spare parts & CPK" count={data.parts.length} query={query} setQuery={setQuery} placeholder="Search name, brand, or SKU…"/>
- <div className="part-performance-toolbar"><label>Performance for <select aria-label="Filter part performance by truck model" value={model} onChange={e=>setModel(e.target.value)}><option value="">All truck models</option>{models.map(m=><option key={m}>{m}</option>)}</select></label><span>Completed lifecycles only · IDR per unit / km</span></div>
- <div className="table-scroll"><table><thead><tr><th>Part / SKU</th><th>Brand / category</th><th>Unit price</th><th>Observed CPK</th><th>Average life</th><th>Lifecycle evidence</th><th>Actions</th></tr></thead><tbody>{data.parts.filter(matches).map(p=>{
- const stats=summarizePartCycles(data.analytics.cycles,p.id,model);
- return <tr key={p.id} className={selectedId===p.id?'selected-part-row':''}><td><div className="entity"><span className="entity-icon"><Package size={18}/></span><div><strong>{p.name}</strong><small>{p.sku} · {p.models.join(', ')}</small></div></div></td><td>{p.brand}<small>{p.category}</small></td><td><strong>{money(p.price)}</strong></td><td><strong className="part-cpk">{cpk(stats.cpk)}</strong><small>{stats.cpk===null?'Awaiting replacement':'IDR / unit / km'}</small></td><td><strong>{stats.avgLife===null?'—':`${number(stats.avgLife)} km`}</strong><small>{stats.avgLife===null?'No completed lifespan':'Completed lifespans'}</small></td><td><span className="pill">{stats.completed} completed record{stats.completed===1?'':'s'}</span><small>{stats.units} units completed · {stats.active} in service</small></td><td><div className="part-row-actions"><button className="text-button" aria-expanded={selectedId===p.id} onClick={()=>setSelectedId(selectedId===p.id?null:p.id)}>View lifecycles <ArrowRight size={13}/></button><Actions onEdit={()=>onEdit(p)} onDelete={()=>onDelete(p)}/></div></td></tr>;
- })}</tbody></table>{!data.parts.filter(matches).length&&<Empty text="No parts found. Add a spare part to the catalog."/>}</div>
- <div className="section-foot">CPK uses actual purchase cost + installation labor from completed replacements. Catalog prices do not determine CPK. Active parts have no final CPK yet.</div></section>
- {selected&&<section id="part-lifecycle-history" className="card part-lifecycles"><div className="card-heading"><div><span className="eyebrow">INSTALLATION & REPLACEMENT HISTORY</span><h2>{selected.brand} · {selected.name}</h2><p>{model||'All truck models'} · {summary.completed} completed records · {summary.active} units still in service</p></div><button className="icon-button" aria-label="Close lifecycle history" onClick={()=>setSelectedId(null)}><X size={19}/></button></div>
- <div className="table-scroll"><table><thead><tr><th>Truck / position</th><th>Installed</th><th>Replaced</th><th>Life / distance</th><th>Installed cost</th><th>Part CPK</th><th>Status</th></tr></thead><tbody>{summary.cycles.slice().sort((a,b)=>b.startDate.localeCompare(a.startDate)).map((c,i)=><tr key={c.installationId||i}><td><strong>{data.trucks.find(t=>t.id===c.truckId)?.plate}</strong><small>{c.model} · {c.duty}</small><small>{c.position}{c.quantity>1?` · ${c.quantity} units tracked together`:''}</small></td><td>{number(c.odometer)} km<small>{date(c.startDate)}</small></td><td>{c.status==='completed'?`${number(c.endOdometer)} km`:'—'}<small>{c.endDate?date(c.endDate):'Still installed'}</small></td><td><strong>{number(c.distance)} km</strong><small>{c.status==='active'?'Distance so far':'Completed lifespan'}</small></td><td>{money(c.cost)}<small>{c.quantity>1?`Total for ${c.quantity} units`:'Part + installation labor'}</small></td><td><strong className="part-cpk">{cpk(c.unitCpk)}</strong><small>{c.status==='active'?'Awaiting replacement':c.distance===0?'No distance recorded':c.quantity>1?'IDR / unit / km · allocated':'IDR / km'}</small></td><td><span className={'pill '+(c.status==='active'?'green':'')}>{c.status==='active'?'In service':'Replaced'}</span></td></tr>)}</tbody></table>{!summary.cycles.length&&<Empty text="No installation history for this part and truck model. Log it during a workshop visit to start tracking."/>}</div>
- <div className="section-foot">A replacement at the same category and position closes the old part’s life—even when the new brand differs. For individual tracking, enter quantity 1 and a distinct physical position for each part. Grouped records allocate installation labor evenly across units and assume a shared lifespan.</div></section>}
- <div className="method-note"><AlertCircle size={16}/><span>Catalog CPK = completed installation costs ÷ completed unit-kilometers. Average life is weighted by unit count. These are observed summaries across the selected model’s positions and operating profiles; use Mix optimizer for comparisons under matching conditions.</span></div>
- </>;
 }
 function Metric({label,value,unit,icon:Icon,note,featured}){return <section className={'metric '+(featured?'featured':'')}><div className="metric-label">{label}<Icon size={18}/></div><div className="metric-value">{value}<span>{unit}</span></div><div className="metric-note">{note}</div></section>;}
 function TableHeader({title,count,query,setQuery,placeholder}){return <div className="card-heading"><div className="title-count"><h2>{title}</h2><span className="count">{count}</span></div><label className="search"><Search size={16}/><input aria-label={placeholder} placeholder={placeholder} value={query} onChange={e=>setQuery(e.target.value)}/></label></div>;}

@@ -1,0 +1,6 @@
+# Not needed by the API/web server; keeps `railway up` uploads small. .gitignore entries (.env, data/, node_modules/) are skipped too.
+mobile/
+kilometric-mobile-ui-en/
+anti-slop/
+docs/
+test/

@@ -45,3 +45,12 @@
 /* Date filters in list tables (Maintenance history). */
 .list-filter input{width:150px;height:34px;font-size:10px;text-transform:none;letter-spacing:0;padding:6px 10px}
 @media(max-width:700px){.list-filter input{width:100%}}
+/* Onboarding tour */
+.tour-block{position:fixed;inset:0;z-index:1000}.tour-block.dim{background:#0d2a2780}
+.tour-spot{position:fixed;z-index:1001;border-radius:12px;box-shadow:0 0 0 9999px #0d2a2780;outline:2px solid var(--lime);pointer-events:none;transition:top .2s,left .2s,width .2s,height .2s}
+.tour-card{position:fixed;z-index:1002;width:min(360px,calc(100vw - 32px));background:white;border-radius:13px;box-shadow:0 20px 60px #0d2a2740;padding:18px 18px 14px}
+.tour-card.centred{top:50%;left:50%;transform:translate(-50%,-50%)}
+.tour-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}.tour-head h2{margin:0;font:700 17px Manrope,sans-serif;color:var(--green)}.tour-head span{color:var(--muted);font-size:12px;white-space:nowrap}
+.tour-card p{margin:8px 0 16px;line-height:1.5;color:#41544c}
+.tour-actions{display:flex;align-items:center;gap:8px}.tour-actions>span{flex:1}.tour-actions .text-button{padding-left:0}
+@media(prefers-reduced-motion:reduce){.tour-spot{transition:none}}

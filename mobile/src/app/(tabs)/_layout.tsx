@@ -1,6 +1,7 @@
 import { Redirect, Tabs } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { ColorValue } from 'react-native';
+import { TourProvider } from '@/components/Tour';
 import { Button, H1, Icon, Loading, s, type IconName } from '@/components/ui';
 import { useApp } from '@/lib/app';
 import { C } from '@/lib/theme';
@@ -20,11 +21,13 @@ export default function TabLayout() {
   );
   const open = data?.orders.filter(o => o.status !== 'completed').length ?? 0;
   return (
+    <TourProvider ready={!!data}>
     <Tabs screenOptions={{ headerShown: false, tabBarActiveTintColor: C.primary, tabBarInactiveTintColor: C.muted, tabBarStyle: { height: 64, paddingBottom: 8 } }}>
       <Tabs.Screen name="index" options={{ title: 'Orders', tabBarBadge: open || undefined, tabBarIcon: tabIcon('inventory-2') }} />
       <Tabs.Screen name="trip" options={{ title: 'Trip', tabBarIcon: tabIcon('alt-route') }} />
       <Tabs.Screen name="history" options={{ title: 'History', tabBarIcon: tabIcon('history') }} />
       <Tabs.Screen name="account" options={{ title: 'Account', tabBarIcon: tabIcon('person') }} />
     </Tabs>
+    </TourProvider>
   );
 }

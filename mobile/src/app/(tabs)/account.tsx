@@ -2,13 +2,14 @@ import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import { useEffect, useState } from 'react';
 import { Linking, View } from 'react-native';
+import { useTour } from '@/components/Tour';
 import { Badge, Button, Card, Foot, H1, H2, KV, P, Screen, Sheet, Stat } from '@/components/ui';
 import { useApp } from '@/lib/app';
 import { num, rp } from '@/lib/format';
 import { isExpoGo } from '@/lib/tracking';
 
 export default function Account() {
-  const app = useApp(), u = app.user;
+  const app = useApp(), u = app.user, tour = useTour();
   const [perm, setPerm] = useState('checking…'), [confirm, setConfirm] = useState(false);
   useEffect(() => { (async () => {
     const fg = await Location.getForegroundPermissionsAsync(), bg = isExpoGo ? null : await Location.getBackgroundPermissionsAsync().catch(() => null);
@@ -37,6 +38,7 @@ export default function Account() {
         <Button kind="flat" title="Open location settings" onPress={() => Linking.openSettings()} />
         <Foot>For background tracking, set location to “Allow all the time” for KiloMetric.</Foot>
       </Card>
+      <Button kind="secondary" icon="help-outline" title="Show app guide" onPress={tour.start} />
       <Button kind="danger" icon="logout" title="Sign out" onPress={() => setConfirm(true)} />
       <Sheet visible={confirm} onClose={() => setConfirm(false)}>
         <H2>Sign out?</H2>

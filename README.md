@@ -6,7 +6,7 @@ React + JavaScript frontend with a Node.js backend. A local demo with role-based
 
 - **Web dashboard:** https://kilometric-799771602971.asia-southeast1.run.app/
   Sign in with `admin@demo.id`, `manager@demo.id` or `workshop@demo.id`, password `demo1234`. The Guide button (top right) replays the tour.
-- **Driver app (Android APK):** [download from Expo](https://expo.dev/accounts/rocky_saputra/projects/kilometric-driver/builds/6e2e0e90-bc78-41a8-9d72-6263cb818b97), or scan the code below on the phone.
+- **Driver app (Android APK):** [download from Expo](https://expo.dev/accounts/rocky_saputra/projects/kilometric-driver/builds/d9663165-56d3-4564-a2ee-8dcc8968710c), or scan the code below on the phone.
   The demo driver `driver@demo.id` / `demo1234` is filled in; tap **Sign in**.
 
   <img src="docs/img/driver-apk-qr.png" alt="QR code linking to the KiloMetric driver APK" width="180">

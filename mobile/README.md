@@ -36,15 +36,15 @@ npx eas-cli@latest build -p android --profile preview
 
 The build takes about 10–20 minutes on Expo's servers. Open the download link on the phone and install the APK. On the first trip, allow location **"Allow all the time"**. The app then records with the screen locked and shows a "KiloMetric is recording your trip" notification. The APK allows plain `http://` so it can reach the laptop server on the LAN (`usesCleartextTraffic`, demo only).
 
-## Optional: default server address
+## Server address
 
-Create `mobile/.env.local` (gitignored):
+The app always talks to the public demo server `https://kilometric-799771602971.asia-southeast1.run.app` (`src/lib/api.ts`). Drivers cannot change it. To point a dev build at a laptop server, create `mobile/.env.local` (gitignored) and restart Expo:
 
 ```env
 EXPO_PUBLIC_API_URL=http://192.168.1.20:3000
 ```
 
-The value is inlined at bundle time. The sign-in screen still lets the driver change it, and the choice is saved on the device.
+The value is inlined at bundle time, so an APK keeps the address it was built with.
 
 ## Checks
 

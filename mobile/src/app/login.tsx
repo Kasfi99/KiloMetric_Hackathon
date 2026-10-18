@@ -10,10 +10,7 @@ import { C } from '@/lib/theme';
 const DEMO_EMAIL = 'driver@demo.id', DEMO_PASSWORD = 'demo1234';
 
 export default function Login() {
-  const { status, apiUrl, signIn } = useApp();
-  // apiUrl is loaded before the provider leaves 'loading', so it is ready when this screen mounts.
-  const [server, setServer] = useState(apiUrl);
-  const [editServer, setEditServer] = useState(false);
+  const { status, signIn } = useApp();
   // Hackathon demo build: prefilled with the public demo driver (server DEMO_MODE). Clear these for a real deployment.
   const [email, setEmail] = useState(DEMO_EMAIL);
   const [password, setPassword] = useState(DEMO_PASSWORD);
@@ -24,16 +21,16 @@ export default function Login() {
   const { scrollRef, onScroll, bottomInset, reveal } = useKeyboardAware();
   if (status === 'signedIn') return <Redirect href="/" />;
 
-  const ready = !!server.trim() && !!email.trim() && !!password;
+  const ready = !!email.trim() && !!password;
   const submit = async () => {
     if (!ready || busy) return;
     setBusy(true); setError(null);
-    try { await signIn(server, email.trim(), password); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    try { await signIn(email.trim(), password); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
   return (
     <SafeAreaView style={[s.safe, { backgroundColor: C.surface }]}>
       <KeyboardReveal value={reveal}>
-        {/* Email and password sit in the top half so the keyboard rarely covers them; the server field is tucked below. */}
+        {/* Email and password sit in the top half so the keyboard rarely covers them. */}
         <ScrollView ref={scrollRef} onScroll={onScroll} scrollEventThrottle={16} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 24, paddingTop: 28, paddingBottom: 24 + bottomInset }}>
           <View style={[s.row, { gap: 12, marginBottom: 20 }]}>
             <View style={[s.brandmark, { width: 44, height: 44, borderRadius: 14 }]}><Icon name="alt-route" color="#fff" size={24} /></View>
@@ -46,16 +43,6 @@ export default function Login() {
           </View>
           {error && <Banner tone="error">{error}</Banner>}
           <Button title="Sign in" icon="arrow-forward" onPress={submit} loading={busy} disabled={!ready} />
-          <View style={{ marginTop: 20, paddingTop: 16, borderTopWidth: 1, borderColor: C.border }}>
-            {editServer || !server.trim() ? (
-              <Field label="Server" value={server} onChangeText={setServer} autoCapitalize="none" autoCorrect={false} keyboardType="url" returnKeyType="done" hint="Shown by `npm run dev:lan` on the laptop, e.g. http://192.168.1.20:3000" />
-            ) : (
-              <View style={[s.row, { justifyContent: 'space-between' }]}>
-                <View style={{ flex: 1 }}><Text style={s.small}>Server</Text><Text style={{ fontWeight: '600' }} numberOfLines={1}>{server}</Text></View>
-                <Button kind="flat" title="Change" onPress={() => setEditServer(true)} />
-              </View>
-            )}
-          </View>
           <Foot>Demo driver account is filled in.</Foot>
         </ScrollView>
       </KeyboardReveal>

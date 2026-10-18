@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
-export const KEYS = { token: 'kilometric_token', apiUrl: 'kilometric_api_url', draft: 'kilometric_pretrip_draft', queue: 'kilometric_gps_queue', activeTrip: 'kilometric_active_trip', lastFix: 'kilometric_last_fix' } as const;
+export const KEYS = { token: 'kilometric_token', draft: 'kilometric_pretrip_draft', queue: 'kilometric_gps_queue', activeTrip: 'kilometric_active_trip', lastFix: 'kilometric_last_fix' } as const;
 
 export async function readJson<T>(key: string, fallback: T): Promise<T> {
   try { const raw = await AsyncStorage.getItem(key); return raw == null ? fallback : (JSON.parse(raw) as T); } catch { return fallback; }

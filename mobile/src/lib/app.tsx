@@ -1,7 +1,7 @@
 import NetInfo from '@react-native-community/netinfo';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState as RNAppState } from 'react-native';
-import { api, ApiError, DEFAULT_API_URL, getApiUrl, setUnauthorizedHandler } from './api';
+import { api, ApiError, API_URL, setUnauthorizedHandler } from './api';
 import { clearQueue, flush, onPendingChange, readQueue } from './queue';
 import { KEYS, clearToken, getToken, readJson, remove, setToken, writeJson } from './storage';
 import { startTracking, stopTracking, type TrackingMode } from './tracking';
@@ -24,7 +24,7 @@ type Ctx = {
   status: 'loading' | 'signedOut' | 'signedIn'; user: User | null; apiUrl: string; data: AppState | null; loadError: string | null; online: boolean; pending: number;
   tracking: TrackingMode; gps: LocationPoint | null; setGps: (p: LocationPoint | null) => void;
   draft: Draft | null; setDraft: (d: Draft | null) => void; patchDraft: (p: Partial<Draft>) => void; preview: Preview | null; setPreview: (p: Preview | null) => void;
-  refresh: () => Promise<void>; signIn: (apiUrl: string, email: string, password: string) => Promise<void>; signOut: () => Promise<void>;
+  refresh: () => Promise<void>; signIn: (email: string, password: string) => Promise<void>; signOut: () => Promise<void>;
   beginTracking: (tripId: string) => Promise<void>; endTracking: () => Promise<void>;
   activeTrip: Trip | null; truck: (id?: string | null) => Truck | null; order: (id?: string | null) => Order | null; cpk: (truckId?: string | null) => number | null;
 };
@@ -34,7 +34,6 @@ export const useApp = () => { const c = useContext(AppCtx); if (!c) throw new Er
 export function AppProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Ctx['status']>('loading');
   const [user, setUser] = useState<User | null>(null);
-  const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
   const [data, setData] = useState<AppState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [online, setOnline] = useState(true);
@@ -73,7 +72,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const offNet = NetInfo.addEventListener(s => { const up = s.isConnected !== false && s.isInternetReachable !== false; setOnline(up); if (up) flush(); });
     const offApp = RNAppState.addEventListener('change', s => { if (s === 'active') flush(); });
     (async () => {
-      setApiUrl(await getApiUrl());
       const saved = migrateDraft(await readJson<Draft | null>(KEYS.draft, null));
       draftRef.current = saved; setDraftState(saved);
       setPending((await readQueue()).points.length);
@@ -87,9 +85,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { offPending(); offNet(); offApp.remove(); };
   }, [refresh, signedOut]);
 
-  const signIn = useCallback(async (url: string, email: string, password: string) => {
-    const clean = url.trim().replace(/\/$/, '');
-    await writeJson(KEYS.apiUrl, clean); setApiUrl(clean);
+  const signIn = useCallback(async (email: string, password: string) => {
     const r = await api<{ user: User; token: string }>('/api/login', { method: 'POST', body: { email, password, client: 'mobile' }, auth: false });
     await setToken(r.token); setUser(r.user); setStatus('signedIn');
     if (r.user.role === 'driver') await refresh();
@@ -98,10 +94,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => { try { await api('/api/logout', { method: 'POST', body: {} }); } catch {} setDraft(null); await clearQueue(); await signedOut(); }, [setDraft, signedOut]);
 
   const value = useMemo<Ctx>(() => ({
-    status, user, apiUrl, data, loadError, online, pending, tracking, gps, setGps, draft, setDraft, patchDraft, preview, setPreview, refresh, signIn, signOut, beginTracking, endTracking, activeTrip,
+    status, user, apiUrl: API_URL, data, loadError, online, pending, tracking, gps, setGps, draft, setDraft, patchDraft, preview, setPreview, refresh, signIn, signOut, beginTracking, endTracking, activeTrip,
     truck: id => data?.trucks.find(t => t.id === id) ?? null,
     order: id => data?.orders.find(o => o.id === id) ?? null,
     cpk: id => data?.analytics.trucks.find(t => t.id === id)?.cpk ?? null,
-  }), [status, user, apiUrl, data, loadError, online, pending, tracking, gps, draft, setDraft, patchDraft, preview, refresh, signIn, signOut, beginTracking, endTracking, activeTrip]);
+  }), [status, user, data, loadError, online, pending, tracking, gps, draft, setDraft, patchDraft, preview, refresh, signIn, signOut, beginTracking, endTracking, activeTrip]);
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
 }

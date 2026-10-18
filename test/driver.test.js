@@ -119,7 +119,7 @@ test('routePlan snapshot: validated, stored on trip.routing, optional',()=>{
  assert.equal(routePlanSnapshot({...priced,cost:{...priced.cost,extra:'x'}}).cost.extra,undefined,'unknown fields are dropped');
  assert.equal(routePlanSnapshot(undefined),null);
  assert.deepEqual(routePlanSnapshot({...plan,explanation:null}).explanation,null);
- assert.throws(()=>routePlanSnapshot({...plan,provider:'google'}),/provider/i);
+ assert.throws(()=>routePlanSnapshot({...plan,provider:'here'}),/provider/i);
  assert.throws(()=>routePlanSnapshot({...plan,polyline:[[-6,'x']]}),/polyline/i);
  assert.throws(()=>routePlanSnapshot({...plan,distanceKm:0}),/distance/i);
  assert.throws(()=>routePlanSnapshot({...plan,restrictions:{checked:'height',unknown:[]}}),/restrictions/i);

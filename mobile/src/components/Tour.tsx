@@ -17,7 +17,7 @@ const STEPS: Step[] = [
   { tab: 0, href: '/', title: 'Orders', body: 'Orders the admin assigned to you. Tap an order to see its stops, then Prepare delivery to start the trip.' },
   { tab: 1, href: '/trip', title: 'Trip', body: 'Declare the cargo, pick a route and photograph the odometer before you leave. GPS runs while you drive. On arrival, enter and photograph the odometer again.' },
   { tab: 2, href: '/history', title: 'History', body: 'Your finished trips. Tap one to see its route and distance.' },
-  { tab: 3, href: '/account', title: 'Account', body: 'Your trucks, location permission and sign out. Open this guide again with Show app guide.' },
+  { tab: 3, href: '/account', title: 'Account', body: 'Your trucks and their maintenance cost per km, and sign out. Open this guide again with Show app guide.' },
 ];
 
 const TourContext = createContext<{ start: () => void }>({ start: () => {} });

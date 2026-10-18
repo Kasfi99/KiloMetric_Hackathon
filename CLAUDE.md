@@ -52,6 +52,7 @@ Live ORS limits measured 16 Oct 2026 (encoded in `lib/routing.js`, keep them):
 - Routes longer than max(3× straight-line, straight-line + 30 km) are dropped. A point snapped to water once produced 3108 km.
 - Pelias geocoding in Indonesia often lands only on the city centroid, or on the wrong venue with confidence 1.0. Precision is therefore judged by `layer`/`match_type`, never by confidence, and the found label is always shown to the driver.
 - Per-axle load is not declared by drivers, so it is never sent to ORS and is always listed as unknown.
+- On 18 Oct 2026 ORS directions hung for 40 s+ (both `driving-hgv` and `driving-car`) while geocoding still answered. `previewRoutes` therefore stops waiting after `ORS_BUDGET_MS` (20 s), then falls back to Google car routes (real roads, traffic, tolls; truck limits unchecked and labelled, provider `google`), else labelled sample routes. The driver app waits 60 s (45 s in older APKs).
 
 ### Roadmap (PRODUCT_DIRECTION.md §15)
 

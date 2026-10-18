@@ -7,7 +7,7 @@ import { Back, Card, Empty, Foot, H1, H2, Icon, KV, P, Screen, Stat } from '@/co
 import { useApp } from '@/lib/app';
 import { dayTime, duration, HAZMAT, num, rp } from '@/lib/format';
 import { C } from '@/lib/theme';
-import type { TripSpecs } from '@/lib/types';
+import { providerLabel, type TripSpecs } from '@/lib/types';
 import { useTripDetail } from '@/lib/useTrip';
 import { useLastFix } from '@/lib/useLastFix';
 
@@ -41,7 +41,7 @@ export default function TripDetail() {
         <P small>{h.maintenanceCpkAtStart != null && h.odometerDistanceKm != null ? `CPK at departure ${rp(h.maintenanceCpkAtStart)}/km × ${num(h.odometerDistanceKm)} km` : 'Truck CPK was unknown at departure.'}</P>
         <Foot>Not an invoice; calculated from historical truck CPK.</Foot>
       </Card>
-      {plan && <Card><H2>Selected route</H2><KV k="Provider" v={plan.provider === 'fixture' ? 'sample routes' : 'OpenRouteService'} /><KV k="Route" v={`${num(plan.distanceKm)} km · ${duration(plan.durationMin)}`} /><KV k="Recommendation" v={plan.cost || plan.explanation ? (plan.wasRecommended ? 'Followed' : 'Different route chosen') : 'None'} />{plan.explanation && <Foot>{plan.explanation.headline}</Foot>}{plan.cost && <RouteCostBlock cost={plan.cost} distanceKm={plan.distanceKm} />}{plan.roadCondition !== undefined && <RoadChips road={plan.roadCondition} distanceKm={plan.distanceKm} />}<RestrictionList r={plan.restrictions} sample={plan.provider === 'fixture'} /><Foot>Planned estimate at departure. The trip maintenance estimate above uses the odometer distance.</Foot></Card>}
+      {plan && <Card><H2>Selected route</H2><KV k="Provider" v={providerLabel(plan.provider)} /><KV k="Route" v={`${num(plan.distanceKm)} km · ${duration(plan.durationMin)}`} /><KV k="Recommendation" v={plan.cost || plan.explanation ? (plan.wasRecommended ? 'Followed' : 'Different route chosen') : 'None'} />{plan.explanation && <Foot>{plan.explanation.headline}</Foot>}{plan.cost && <RouteCostBlock cost={plan.cost} distanceKm={plan.distanceKm} />}{plan.roadCondition !== undefined && <RoadChips road={plan.roadCondition} distanceKm={plan.distanceKm} />}<RestrictionList r={plan.restrictions} sample={plan.provider === 'fixture'} /><Foot>Planned estimate at departure. The trip maintenance estimate above uses the odometer distance.</Foot></Card>}
       <Card><H2>Truck and cargo</H2><KV k="Dimensions" v={sp.heightM == null && sp.widthM == null && sp.lengthM == null ? '—' : `${num(sp.heightM)} × ${num(sp.widthM)} × ${num(sp.lengthM)} m`} /><KV k="Axles" v={num(sp.axles, 0)} /><KV k="Cargo weight" v={`${num(sp.loadKg, 0)} kg`} /><KV k="Gross / maximum" v={sp.grossKg == null && sp.maxGrossKg == null ? '—' : `${num(sp.grossKg, 0)} / ${num(sp.maxGrossKg, 0)} kg`} /><KV k="Hazardous cargo" v={HAZMAT.find(([v]) => v === sp.hazmat)?.[1] ?? sp.hazmat ?? '—'} />{h.specsSource === 'missing' && <Foot>Truck specifications were not set at departure, so truck restrictions were not checked.</Foot>}</Card>
     </Screen>
   );

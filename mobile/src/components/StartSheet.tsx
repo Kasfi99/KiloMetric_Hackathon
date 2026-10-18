@@ -5,7 +5,7 @@ import { useApp } from '@/lib/app';
 import { destination, gpsFresh, gross, master, routePlan, specs } from '@/lib/draft';
 import { duration, num } from '@/lib/format';
 import { getFreshPoint } from '@/lib/tracking';
-import type { RouteCandidate } from '@/lib/types';
+import { providerLabel, type RouteCandidate } from '@/lib/types';
 import { api } from '@/lib/api';
 
 // Two-step start: the sheet repeats the key facts and requires external dispatcher approval.
@@ -42,7 +42,7 @@ export function StartSheet({ visible, onClose, route }: { visible: boolean; onCl
       <KV k="Cargo weight" v={`${num(Number(d.loadKg.replace(',', '.')), 0)} kg`} />
       <KV k="Gross / maximum weight" v={m ? `${num(gross(app, d), 0)} / ${num(m.maxGrossKg, 0)} kg` : '—'} />
       <KV k="Route" v={route ? `${num(route.distanceKm)} km · ${duration(route.durationMin)}` : 'No planned route'} />
-      <KV k="Provider" v={route ? (p?.routing.provider === 'fixture' ? 'sample routes' : 'OpenRouteService') : '—'} />
+      <KV k="Provider" v={route ? providerLabel(p?.routing.provider) : '—'} />
       {approx && <Banner tone="warning">Some destinations are only approximate.</Banner>}
       {!m && <Banner tone="warning">Truck specifications are not set, so height, width, length and weight limits are not checked.</Banner>}
       <Check checked={approved} onChange={setApproved}>This route has been approved by the dispatcher (external planning).</Check>

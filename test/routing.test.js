@@ -327,3 +327,34 @@ test('previewRoutes: ORS → explainer; geocode miss → 422; ORS down → fixtu
  assert.equal(routeStops(Array.from({length:11},(_,i)=>({address:`s${i}`})),11).length,11);
  assert.throws(()=>routeStops([]),/1–10/);assert.throws(()=>routeStops([{address:''}]),/address/i);assert.throws(()=>routeStops(Array.from({length:11},()=>({address:'x'}))),/1–10/);
 });
+
+test('previewRoutes: a hanging or failing provider falls back to sample routes within the time budget',async()=>{
+ // Observed live 18 Oct 2026: ORS directions hung for 40 s+ while geocoding still answered; the app gave up first.
+ const stops=[{address:'Cikarang'}],geo=reply({features:[{geometry:{coordinates:[107.1528,-6.2617]},properties:{confidence:1,label:'Cikarang',layer:'venue',match_type:'exact'}}]});
+ const hang=async url=>String(url).includes('/geocode/')?geo:new Promise(()=>{});
+ const started=Date.now();
+ const slow=await previewRoutes({origin,specs,stops,lang:'en'},{orsKey:'k',gemini:null,fetcher:hang,orsBudgetMs:50});
+ assert.ok(Date.now()-started<2000,'does not wait for the provider timeouts');
+ assert.equal(slow.status,200);assert.equal(slow.body.routing.provider,'fixture');
+ assert.ok(slow.body.routes.every(r=>r.warnings.some(w=>/^Routing provider failed: .*timed out/.test(w))));
+ // Geocoding itself failing must not break the sample-route fallback.
+ const down=await previewRoutes({origin,specs,stops,lang:'en'},{orsKey:'k',gemini:null,fetcher:async()=>{throw new TypeError('fetch failed');}});
+ assert.equal(down.status,200);assert.equal(down.body.routing.provider,'fixture');assert.equal(down.body.stops[0].address,'Cikarang');
+});
+
+test('previewRoutes: ORS down + Google key → Google car routes on real roads, truck limits unchecked',async()=>{
+ const stops=[{address:'Cikarang'}],geo=reply({features:[{geometry:{coordinates:[107.1528,-6.2617]},properties:{confidence:1,label:'Cikarang',layer:'venue',match_type:'exact'}}]});
+ let googleBody;
+ // Google Places is skipped (HTTP 500 → ORS geocoding); ORS directions hang; Google Routes answers.
+ const fetcher=async(url,options)=>{const u=String(url);
+  if(u.includes('places.googleapis.com'))return reply({},false,500);
+  if(u.includes('/geocode/'))return geo;
+  if(u.includes('routes.googleapis.com')){googleBody=JSON.parse(options.body);return reply({routes:[{distanceMeters:46000,duration:'2400s',polyline:{encodedPolyline:'_p~iF~ps|U_ulLnnqC_mqNvxq`@'}},{distanceMeters:40000,duration:'2700s',polyline:{encodedPolyline:'_p~iF~ps|U_ulLnnqC'},travelAdvisory:{tollInfo:{estimatedPrice:[{currencyCode:'IDR',units:'12000'}]}}}]});}
+  return new Promise(()=>{});};
+ const res=await previewRoutes({origin,specs,stops,lang:'en'},{orsKey:'k',googleKey:'g',gemini:null,fetcher,orsBudgetMs:50});
+ assert.equal(res.status,200);assert.equal(res.body.routing.provider,'google');
+ assert.equal(googleBody.computeAlternativeRoutes,true);assert.equal(googleBody.destination.location.latLng.latitude,-6.2617);
+ assert.deepEqual(res.body.routes.map(r=>[r.id,r.distanceKm,r.durationMin,r.tollIdr]),[['google-1',46,40,0],['google-2',40,45,12000]]);
+ assert.deepEqual(res.body.routes[0].polyline,[[38.5,-120.2],[40.7,-120.95],[43.252,-126.453]]);
+ for(const r of res.body.routes){assert.deepEqual(r.restrictions.checked,[]);assert.ok(r.warnings.some(w=>/Google Maps for cars/.test(w)&&/timed out/.test(w)));}
+});

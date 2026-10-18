@@ -1,7 +1,7 @@
 import NetInfo from '@react-native-community/netinfo';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState as RNAppState } from 'react-native';
-import { api, ApiError, API_URL, setUnauthorizedHandler } from './api';
+import { api, ApiError, setUnauthorizedHandler } from './api';
 import { clearQueue, flush, onPendingChange, readQueue } from './queue';
 import { KEYS, clearToken, getToken, readJson, remove, setToken, writeJson } from './storage';
 import { startTracking, stopTracking, type TrackingMode } from './tracking';
@@ -21,7 +21,7 @@ function migrateDraft(saved: (Partial<Draft> & { specs?: { loadKg?: unknown } })
 }
 
 type Ctx = {
-  status: 'loading' | 'signedOut' | 'signedIn'; user: User | null; apiUrl: string; data: AppState | null; loadError: string | null; online: boolean; pending: number;
+  status: 'loading' | 'signedOut' | 'signedIn'; user: User | null; data: AppState | null; loadError: string | null; online: boolean; pending: number;
   tracking: TrackingMode; gps: LocationPoint | null; setGps: (p: LocationPoint | null) => void;
   draft: Draft | null; setDraft: (d: Draft | null) => void; patchDraft: (p: Partial<Draft>) => void; preview: Preview | null; setPreview: (p: Preview | null) => void;
   refresh: () => Promise<void>; signIn: (email: string, password: string) => Promise<void>; signOut: () => Promise<void>;
@@ -94,7 +94,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => { try { await api('/api/logout', { method: 'POST', body: {} }); } catch {} setDraft(null); await clearQueue(); await signedOut(); }, [setDraft, signedOut]);
 
   const value = useMemo<Ctx>(() => ({
-    status, user, apiUrl: API_URL, data, loadError, online, pending, tracking, gps, setGps, draft, setDraft, patchDraft, preview, setPreview, refresh, signIn, signOut, beginTracking, endTracking, activeTrip,
+    status, user, data, loadError, online, pending, tracking, gps, setGps, draft, setDraft, patchDraft, preview, setPreview, refresh, signIn, signOut, beginTracking, endTracking, activeTrip,
     truck: id => data?.trucks.find(t => t.id === id) ?? null,
     order: id => data?.orders.find(o => o.id === id) ?? null,
     cpk: id => data?.analytics.trucks.find(t => t.id === id)?.cpk ?? null,

@@ -14,7 +14,7 @@ import { getFreshPoint } from '@/lib/tracking';
 import { useLastFix } from '@/lib/useLastFix';
 import type { Preview, PreviewStop, StopOrder } from '@/lib/types';
 
-const TIMEOUT_MS = 45000, SLOW_MS = 8000;
+const TIMEOUT_MS = 60000, SLOW_MS = 8000;
 
 function StopSuggestion({ sug, applied, names, hasPickup, onUse, onKeep }: { sug: NonNullable<StopOrder['suggestion']>; applied: number[]; names: string[]; hasPickup: boolean; onUse: () => void; onKeep: () => void }) {
   const m = sug.minutes, ai = sug.source === 'gemini' && sug.basis === 'notes';
@@ -118,7 +118,7 @@ export default function Routes() {
       {shared.map(w => <Banner key={w}>{w}</Banner>)}
       {reordered && <><Banner>Using the suggested stop order</Banner><Button kind="flat" title="Back to order as entered" onPress={() => load(null)} /></>}
       {sug && <StopSuggestion sug={sug} applied={so!.applied} names={names} hasPickup={!!d.orderId} onUse={() => load(sug.order)} onKeep={() => setKept(sug.order.join())} />}
-      {p.routing.provider === 'ors' && <Found stops={p.stops} hasPickup={!!d.orderId} />}
+      {p.routing.provider !== 'fixture' && <Found stops={p.stops} hasPickup={!!d.orderId} />}
       {routes.map((r, i) => {
         const own = r.warnings.filter(w => !shared.includes(w)), on = i === index, q = x.status === 'ok' ? x.perRoute.find(e => e.routeId === r.id) : undefined;
         // Hide empty AI parts instead of drawing blank rows.

@@ -38,13 +38,13 @@ Logistics operators do not know what each truck actually costs to keep running p
 - **Estimates ≠ actuals.** Trip/order maintenance *estimates* (historical CPK × distance) are snapshots and never become maintenance expenses or enter the CPK numerator. Maintenance CPK excludes fuel, toll, purchase price.
 - **Historical records are immutable facts.** Catalog price edits don't change saved visit prices. Edits/deletes recalc derived mileage but preserve independently reported odometer.
 - **Server-side RBAC**, not hidden buttons. Driver sees only assigned trucks / own trips / own orders. Manager & workshop get no order records. Admin only for users, OCR, order assignment.
-- **State labels** when discussing features: *Tersedia* (in demo code), *Placeholder* (config/contract only), *Rencana* (not built), *Perlu keputusan* (business choice pending). Don't claim something "done" because unit tests with mocks pass — live Gemini/Maps, real-device GPS, PWA install are untested.
+- **State labels** when discussing features: *Available* (in demo code), *Placeholder* (config/contract only), *Planned* (not built), *Needs decision* (business choice pending). Don't claim something "done" because unit tests with mocks pass — live Gemini/Maps, real-device GPS, PWA install are untested.
 
 ### Current status (16 Oct 2026)
 
-Tersedia: catalog, workshop check-in + auto truck registration, truck/fleet CPK, part cycles + catalog CPK, Mix optimizer, Gemini analyst (needs key), login/RBAC/assignments, mobile bearer login, trip declaration + foreground GPS, PWA shell + offline page, OCR delivery orders + assignment (needs Gemini key), Google Routes distance/toll (needs Maps key), ORS truck route alternatives + Gemini route explanation (needs `ORS_API_KEY`, Gemini optional), route plan snapshot on trips.
+Available: catalog, workshop check-in + auto truck registration, truck/fleet CPK, part cycles + catalog CPK, Mix optimizer, Gemini analyst (needs key), login/RBAC/assignments, mobile bearer login, trip declaration + foreground GPS, PWA shell + offline page, OCR delivery orders + assignment (needs Gemini key), Google Routes distance/toll (needs Maps key), ORS truck route alternatives + Gemini route explanation (needs `ORS_API_KEY`, Gemini optional), route plan snapshot on trips.
 Placeholder: web map tiles, turn-by-turn navigation, elevation-based cost.
-Rencana: `mobile/` app (spec in `design.md`), production DB, audit trail, persistent sessions, multi-company, proof of delivery, per-stop status, order merging, tire rotation / part transfer between trucks.
+Planned: `mobile/` app (spec in `design.md`), production DB, audit trail, persistent sessions, multi-company, proof of delivery, per-stop status, order merging, tire rotation / part transfer between trucks.
 
 Live ORS limits measured 16 Oct 2026 (encoded in `lib/routing.js`, keep them):
 - Alternatives are requested only when the straight-line distance is ≤ 70 km; ORS rejects alternatives above ~100 km road distance (error 2004).
@@ -53,7 +53,7 @@ Live ORS limits measured 16 Oct 2026 (encoded in `lib/routing.js`, keep them):
 - Pelias geocoding in Indonesia often lands only on the city centroid, or on the wrong venue with confidence 1.0. Precision is therefore judged by `layer`/`match_type`, never by confidence, and the found label is always shown to the driver.
 - Per-axle load is not declared by drivers, so it is never sent to ORS and is always listed as unknown.
 
-### Roadmap (ARAH_PENGEMBANGAN.md §15)
+### Roadmap (PRODUCT_DIRECTION.md §15)
 
 A validate maintenance flow → B physical part tracking (standard positions, install IDs, removal reasons, master-data snapshots) → C driver/PWA pilot on real phones (HTTPS, non-demo accounts) → D truck-safe routing provider with provenance → E evidence-based fuel/toll/terrain estimates → F ops readiness (DB, audit, monitoring, restore).
 
@@ -112,6 +112,6 @@ Live probes (they need keys in `.env`, never commit their output): `node --env-f
 
 See `.env.example`. Key vars: `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_OCR_MODEL`, `GEMINI_ROUTE_MODEL` (route explanations and odometer photo reads need a fast model; `gemini-flash-lite-latest` measured ≈ 5 s for routes and ≈ 2 s for photos, heavier flash models time out), `MAPS_API_KEY`, `ORS_API_KEY`, `DEMO_MODE` (default on; `0` requires `ADMIN_EMAIL` + 12+ char `ADMIN_PASSWORD` for a fresh DB), `APP_ORIGIN`/`COOKIE_SECURE`/`HOST` for deployment. Demo logins: `admin|manager|workshop|driver@demo.id` / `demo1234`.
 
-## Further docs (Indonesian)
+## Further docs
 
-`ARAH_PENGEMBANGAN.md` (product direction/roadmap; §22 = driver app + routing), `MODUL_DAN_RUMUS.md` (modules and all formulas with examples). `README.md` documents user-facing behavior in detail. `design.md` is the mobile app spec/API contract: change server response shapes and `design.md` §4 together. Plans live in `docs/plans/`.
+`PRODUCT_DIRECTION.md` (product direction/roadmap; §22 = driver app + routing), `MODULES_AND_FORMULAS.md` (modules and all formulas with examples). `README.md` documents user-facing behavior in detail. `design.md` is the mobile app spec/API contract: change server response shapes and `design.md` §4 together. Plans live in `docs/plans/`.

@@ -2,11 +2,22 @@
 
 React + JavaScript frontend with a Node.js backend. A local demo with role-based sign-in, maintenance cost per kilometer (CPK), spare-part comparisons, driver trip recording, foreground phone GPS and optional Gemini analysis.
 
+## Try it
+
+- **Web dashboard:** https://kilometric-799771602971.asia-southeast1.run.app/
+  Sign in with `admin@demo.id`, `manager@demo.id` or `workshop@demo.id`, password `demo1234`. The Guide button (top right) replays the tour.
+- **Driver app (Android APK):** [download from Expo](https://expo.dev/accounts/rocky_saputra/projects/kilometric-driver/builds/6e2e0e90-bc78-41a8-9d72-6263cb818b97), or scan the code below on the phone.
+  The demo driver `driver@demo.id` / `demo1234` is filled in; tap **Sign in**.
+
+  <img src="docs/img/driver-apk-qr.png" alt="QR code linking to the KiloMetric driver APK" width="180">
+
+Installing the APK: open the link on an Android phone and tap **Install**. Allow **Install unknown apps** for the browser when Android asks, and choose **Install anyway** if Play Protect warns about an unknown app. On the first trip, set location to **Allow all the time** so GPS keeps recording with the screen locked.
+
 ## Project direction
 
-See [Arah Produk dan Pengembangan](ARAH_PENGEMBANGAN.md) for the detailed Indonesian blueprint: business workflows, CPK rules, current implementation status, RBAC, Maps/Gemini/PWA plans, roadmap, and acceptance criteria.
+See [Product Direction and Development](PRODUCT_DIRECTION.md) for the detailed blueprint: business workflows, CPK rules, current implementation status, RBAC, Maps/Gemini/PWA plans, roadmap, and acceptance criteria.
 
-For a module-by-module explanation and all implemented formulas with examples, see [Panduan Modul, Data, dan Rumus](MODUL_DAN_RUMUS.md) (Indonesian).
+For a module-by-module explanation and all implemented formulas with examples, see [Modules, Data and Formulas](MODULES_AND_FORMULAS.md).
 
 ## Run locally
 
